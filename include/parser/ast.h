@@ -1,39 +1,45 @@
 #pragma once
 
-#include "parser/lexer.h"
-
+#include <string_view>
 #include <vector>
-#include <memory>
 
-enum class StatementType {
-    select,
-    insert,
-    createTable,
-    //TODO: add more types
-};
+#include <parser/lexer.h>
 
-class Statement {
+class SelectClause {
     private:
-        [[maybe_unused]] const StatementType typeOfStatement;
+        std::vector<std::string_view> columns;
     public:
-        constexpr Statement(StatementType s) noexcept : typeOfStatement{s} {}
+        SelectClause(std::vector<std::string_view>& c): columns{c} {}
+        SelectClause() noexcept: columns{} {}
 };
 
-class SelectStatement: Statement {
-
-};
-
-class ASTNode {
+class FromClause {
     private:
-        std::vector<std::unique_ptr<ASTNode>> childern;
-        std::unique_ptr<Statement> statement;
+        std::string_view table;
     public:
-        ASTNode() noexcept : childern{} {}
-        void addNode(ASTNode&) noexcept;
+        constexpr FromClause(std::string_view t) noexcept: table{t} {}
+        constexpr FromClause() noexcept {}
+};
+
+class SelectStatement {
+    private:
+        SelectClause sc;
+        FromClause fc;
+        //TODO: add more
+    public:
+        SelectStatement(SelectClause c, FromClause f): sc{c}, fc{f} {};
+        SelectStatement(SelectClause c): sc{c} {};
+        SelectStatement() {};
 };
 
 class AST {
     private:
-        ASTNode root;
+        SelectStatement root;
         Lexer lexer;
+
+        SelectStatement parseSelectStatement();
+        void startParsing();
+    public:
+        AST(std::string_view i) noexcept: root{}, lexer{i} {startParsing();};
+        auto getRoot() const noexcept { return root; }
 };

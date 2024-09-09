@@ -1,8 +1,9 @@
-#include "parser/lexer.h"
-#include "parser/tokens.h"
-
 #include <cctype>
+#include <stdexcept>
 #include <string_view>
+
+#include <parser/lexer.h>
+#include <parser/tokens.h>
 
 void Lexer::readChar() noexcept {
         this->currentChar = this->readPosition >= this->input.length() ?
@@ -12,12 +13,33 @@ void Lexer::readChar() noexcept {
         return;
 }
 
-Token Lexer::nextToken() noexcept {
+std::string_view Lexer::getIdentifier() noexcept {
+    std::size_t currentPosition = position;
+    //skip "
+    readChar();
+    //advance the cursor
+    getWord();
+    //skip " again
+    readChar();
+
+    return std::string_view{input.c_str() + currentPosition, position - currentPosition};
+}
+
+
+Token Lexer::nextToken() {
     Token t;
 
-    this->skipWhiteSpaces();
+    if (input.empty()) {
+        throw std::runtime_error("I FUCKED UP");
+    }
 
-    switch (this->currentChar) {
+    if (position == 0 && !currentChar) {
+        currentChar = input.at(0);
+    }
+
+    skipWhiteSpaces();
+
+    switch (currentChar) {
         case '(':
             t = {TokenType::parenthesesL, '('};
             break;
@@ -27,15 +49,12 @@ Token Lexer::nextToken() noexcept {
         case '+':
             t = {TokenType::plusOperator, '+'};
             break;
-        case '"':
-            t = {TokenType::quoationMark, '"'};
-            break;
         case '\0':
             t = {TokenType::eof, '\0'};
             break;
         default:
-            if (std::isalpha(this->currentChar)) {
-                auto word = this->getWord();
+            if (std::isalpha(currentChar)) {
+                auto word = getWord();
                 if (word == "select") {
                     t = {TokenType::select, word};
                 } else if (word == "from") {
@@ -43,6 +62,8 @@ Token Lexer::nextToken() noexcept {
                 } else {
                     t = {TokenType::identifier, word};
                 }
+            } else if (currentChar == '"') {
+                t = {TokenType::identifier, getIdentifier()};
             } else {
                 t = {TokenType::illegal, '\0'};
             }

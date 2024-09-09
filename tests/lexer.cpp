@@ -3,17 +3,16 @@
 
 #include <catch_amalgamated.hpp>
 
-#include "parser/lexer.h"
-#include "parser/tokens.h"
+#include <parser/lexer.h>
+#include <parser/tokens.h>
 
 TEST_CASE("Lexer tests for symbols", "[lexer]") {
-    constexpr std::string_view input = "()\"";
+    constexpr std::string_view input = "()";
     Lexer l{input};
 
-    const std::array<Token, 3> results {
+    const std::array<Token, 2> results {
         Token{TokenType::parenthesesL, '('},
         {TokenType::parenthesesR, ')'},
-        {TokenType::quoationMark, '"'}
     };
     for (const auto& curentToken : results) {
         auto nextToken = l.nextToken();
@@ -38,6 +37,22 @@ TEST_CASE("Lexer tests for simple select", "[lexer]") {
 }
 
 TEST_CASE("Lexer tests for select", "[lexer]") {
+    constexpr std::string_view input = "select \"foo\" from \"bar\"";
+    Lexer l{input};
+
+    const std::array<Token, 4> results {
+        Token{TokenType::select, "select"},
+        {TokenType::identifier, "\"foo\""},
+        {TokenType::from, "from"},
+        {TokenType::identifier, "\"bar\""},
+    };
+    for (const auto& curentToken : results) {
+        auto nextToken = l.nextToken();
+        REQUIRE(nextToken == curentToken);
+    }
+}
+
+TEST_CASE("Lexer tests for select without \"", "[lexer]") {
     constexpr std::string_view input = "select foo from bar";
     Lexer l{input};
 
@@ -45,7 +60,7 @@ TEST_CASE("Lexer tests for select", "[lexer]") {
         Token{TokenType::select, "select"},
         {TokenType::identifier, "foo"},
         {TokenType::from, "from"},
-        {TokenType::identifier, "bar"}
+        {TokenType::identifier, "bar"},
     };
     for (const auto& curentToken : results) {
         auto nextToken = l.nextToken();
