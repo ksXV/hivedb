@@ -1,10 +1,10 @@
 cmake_minimum_required(VERSION 3.11)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-add_compile_options(-pedantic -Wall -Wextra -Werror -Wshadow -g)
+add_compile_options(-pedantic -Wall -Wextra -Werror -Wshadow -g -O0 -ggdb)
 
 project(hive VERSION 1.0)
 
@@ -17,8 +17,21 @@ FetchContent_Declare(
   GIT_TAG        e69e5f977d458f2650bb346dadf2ad30c5320281) # 10.2.1
 FetchContent_MakeAvailable(fmt)
 
-add_executable(tests tests/lexer.cpp tests/ast.cpp src/parser/lexer.cpp src/parser/tokens.cpp src/parser/ast.cpp)
-add_executable(hive src/main.cpp src/parser/lexer.cpp src/parser/tokens.cpp src/parser/ast.cpp)
+# TODO: ADD tests/ast.cpp back in here
+add_executable(tests
+tests/lexer.cpp
+tests/parser.cpp
+src/parser/lexer.cpp
+src/parser/tokens.cpp
+src/parser/parser.cpp
+)
+
+add_executable(hive
+src/main.cpp
+src/parser/lexer.cpp
+src/parser/tokens.cpp
+src/parser/parser.cpp
+)
 
 include_directories(${PROJECT_SOURCE_DIR}/include)
 
