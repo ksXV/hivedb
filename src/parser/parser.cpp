@@ -1,7 +1,6 @@
 #include <cmath>
 #include <memory>
 #include <cassert>
-#include <catch_amalgamated.hpp>
 
 #include <parser/tokens.hpp>
 #include <parser/parser.hpp>
@@ -10,65 +9,52 @@
 #include <vector>
 
 namespace hivedb {
-    Parser::Parser(const std::vector<Token>& t): m_tokens(t) {}
+    parser::parser(const std::vector<token>& t): m_tokens(t) {}
 
-    const Token& Parser::current() const noexcept {
+    const token& parser::current() const noexcept {
         assert(m_cursor <= m_tokens.size());
         return m_tokens[m_cursor];
     }
 
-    const Token& Parser::previous() const noexcept {
+    const token& parser::previous() const noexcept {
         assert(m_cursor != 0);
         return m_tokens[m_cursor-1];
     }
 
-    const Token& Parser::peek() const noexcept {
+    const token& parser::peek() const noexcept {
         assert(m_cursor+1 <= m_tokens.size());
         return m_tokens[m_cursor+1];
     }
 
-    bool Parser::isDone() const noexcept {
+    bool parser::isDone() const noexcept {
        return m_tokens.size() <= m_cursor;
     }
 
-    const Token& Parser::advance() noexcept {
+    const token& parser::advance() noexcept {
         if (!isDone()) m_cursor++;
         return previous();
     }
 
-    bool Parser::check(TokenType type) const noexcept {
+    bool parser::check(token_type type) const noexcept {
        if (isDone()) return false;
        return current().type == type;
     }
 
 
-    template <std::same_as<TokenType>... T>
-    bool Parser::match(T... types) noexcept {
+    template <std::same_as<token_type>... T>
+    bool parser::match(T... types) noexcept {
         return (... || check(types)) && (advance(), true);
     }
 
-    void Parser::consume(TokenType type, std::string_view err) {
+    void parser::consume(token_type type, std::string_view err) {
         if (match(type)) return;
         throw std::invalid_argument(err.data());
     }
 
-    std::unique_ptr<Expr> Parser::commaExpr() {
+    std::unique_ptr<exprs> parser::binaryExpr() {
        auto e = unaryExpr();
-       if (match(TokenType::comma)) {
-           auto c = std::make_unique<CommaExpr>();
-           c->lhs = std::move(e);
-           c->rhs = binaryExpr();
-
-           return c;
-       }
-
-       return e;
-    }
-
-    std::unique_ptr<Expr> Parser::binaryExpr() {
-       auto e = commaExpr();
-       if (match(TokenType::add, TokenType::substract, TokenType::divide, TokenType::star)) {
-           auto b = std::make_unique<BinaryExpr>();
+       if (match(token_type::add, token_type::substract, token_type::divide, token_type::star)) {
+           auto b = std::make_unique<binary_expr>();
            b->lhs = std::move(e);
            b->op = previous().type;
            b->rhs = binaryExpr();
@@ -79,9 +65,9 @@ namespace hivedb {
        return e;
     }
 
-    std::unique_ptr<Expr> Parser::unaryExpr() {
-       if (match(TokenType::substract, TokenType::bang)) {
-           auto e = std::make_unique<UnaryExpr>();
+    std::unique_ptr<exprs> parser::unaryExpr() {
+       if (match(token_type::substract, token_type::bang)) {
+           auto e = std::make_unique<unary_expr>();
            e->op = previous().type;
            e->rhs = unaryExpr();
            return e;
@@ -90,39 +76,53 @@ namespace hivedb {
        return primaryExpr();
     }
 
-    std::unique_ptr<Expr> Parser::primaryExpr() {
-        if (match(TokenType::quote)) {
-            const auto literal = current().literal;
+    std::unique_ptr<exprs> parser::primaryExpr() {
+        if (match(token_type::string)) {
+            const auto literal = previous().literal;
 
-            auto e = std::make_unique<LiteralExpr<std::string>>(std::string{literal.data(), literal.size()});
+            auto e = std::make_unique<literal_expr<std::string>>(std::string{literal.data(), literal.size()}, false);
 
-            advance();
-
-            consume(TokenType::quote, "Unfinished string.");
             return e;
         }
 
-        if (match(TokenType::integer)) {
+        if (match(token_type::identifier)) {
+            const auto literal = previous().literal;
+
+            auto e = std::make_unique<literal_expr<std::string>>(std::string{literal.data(), literal.size()}, true);
+
+            return e;
+        }
+
+        if (match(token_type::integer)) {
             const auto literal = previous().literal;
 
             // TODO: remove this dumb allocation...
-            auto e = std::make_unique<LiteralExpr<int>>(std::stoi(literal.data()));
+            auto e = std::make_unique<literal_expr<int>>(std::stoi(literal.data()), false);
             return e;
         }
 
-        if (match(TokenType::real)) {
+        if (match(token_type::real)) {
             const auto literal = previous().literal;
+
             // TODO: also remove this dumb allocation...
-            auto e = std::make_unique<LiteralExpr<double>>(std::stod(literal.data()));
+            auto e = std::make_unique<literal_expr<float>>(std::stof(literal.data()), false);
             return e;
         }
 
-        if (match(TokenType::parenthesesL)) {
-            auto e = match(TokenType::select) ? selectExpr() : binaryExpr();
+        if (match(token_type::parenthesesL)) {
+            auto e = match(token_type::select) ? selectExpr() : binaryExpr();
 
-            consume(TokenType::parenthesesR, "Missing parentheses.");
+            consume(token_type::parenthesesR, "Missing parentheses.");
 
-            auto g = std::make_unique<GroupingExpr>();
+            auto g = std::make_unique<grouping_expr>();
+            g->expr = std::move(e);
+            return g;
+        }
+
+        if (match(token_type::select)) {
+            auto e = selectExpr();
+
+            auto g = std::make_unique<grouping_expr>();
             g->expr = std::move(e);
             return g;
         }
@@ -130,56 +130,64 @@ namespace hivedb {
        throw std::invalid_argument("Invalid token: " + std::string(current().name()));
     }
 
-    std::unique_ptr<Expr> Parser::expr() {
-       if (match(TokenType::select)) {
+    std::unique_ptr<exprs> parser::expr() {
+       if (match(token_type::select)) {
           return selectExpr();
-       } else if (match(TokenType::create)) {
+       } else if (match(token_type::create)) {
           return createExpr();
-       } else if (match(TokenType::insert)) {
+       } else if (match(token_type::insert)) {
           return insertExpr();
        }
        throw std::invalid_argument("Invalid token: " + std::string(current().name()));
     }
 
-    std::unique_ptr<Expr> Parser::insertExpr() {
-        auto e = std::make_unique<InsertExpr>();
-        if (!match(TokenType::into)) throw std::invalid_argument("Invalid insert stmt! Missing INTO.");
+    std::unique_ptr<exprs> parser::insertExpr() {
+        auto e = std::make_unique<insert_expr>();
+        consume(token_type::into, "Invalid insert stmt! Missing INTO.");
 
-        if (!match(TokenType::identifier)) throw std::invalid_argument("Invalid insert stmt! Where do i insert into?");
+        consume(token_type::identifier,"Invalid insert stmt! Where do i insert into?");
         e->tblName = previous().literal;
 
-        if (!match(TokenType::parenthesesL)) throw std::invalid_argument("Invalid insert stmt! Missing \"(\" !");
+        consume(token_type::parenthesesL, "Invalid insert stmt! Missing \"(\" !");
 
         while (!isDone()) {
-            if (!match(TokenType::identifier)) throw std::invalid_argument("Invalid insert stmt! Missing column!");
+            consume(token_type::identifier, "Invalid insert stmt! Missing column!");
             std::string_view column = previous().literal;
 
             e->columns.push_back(column);
 
-            if (match(TokenType::comma)) {
+            if (match(token_type::comma)) {
                 continue;
             }
-            if (match(TokenType::parenthesesR)) {
+            if (match(token_type::parenthesesR)) {
                 break;
             }
 
             throw std::invalid_argument("SHOULDNT REACH THIS!");
         }
 
-        if (!match(TokenType::values)) throw std::invalid_argument("Invalid insert stmt! Missing values!!!");
+        consume(token_type::values, "Invalid insert stmt! Missing values!!!");
 
-        if (!match(TokenType::parenthesesL)) throw std::invalid_argument("Invalid insert stmt! Missing values \"(\" !");
+        consume(token_type::parenthesesL, "Invalid insert stmt! Missing values \"(\" !");
 
         while (!isDone()) {
-            if (!match(TokenType::identifier)) throw std::invalid_argument("Invalid insert stmt! Missing column!");
-            std::string_view column = previous().literal;
+            std::variant<std::string_view, int, float> value;
+            if (match(token_type::string)) {
+                value = previous().literal;
+            } else if (match(token_type::integer)) {
+                value = std::stoi(std::string(previous().literal));
+            } else if (match(token_type::real)) {
+                value = std::stof(std::string(previous().literal));
+            } else {
+                throw std::invalid_argument("Unimplemented data type!");
+            }
 
-            e->columns.emplace_back(column);
+            e->values.emplace_back(value);
 
-            if (match(TokenType::comma)) {
+            if (match(token_type::comma)) {
                 continue;
             }
-            if (match(TokenType::parenthesesR)) {
+            if (match(token_type::parenthesesR)) {
                 break;
             }
 
@@ -189,33 +197,36 @@ namespace hivedb {
         return e;
     }
 
-    std::unique_ptr<Expr> Parser::createExpr() {
-        auto e = std::make_unique<CreateTblExpr>();
+    std::unique_ptr<exprs> parser::createExpr() {
+        auto e = std::make_unique<create_tbl_expr>();
 
-        if (!match(TokenType::table)) throw std::invalid_argument("Invalid create stmt! Missing TABLE.");
+        consume(token_type::table, "Invalid create stmt! Missing TABLE.");
 
-        if (!match(TokenType::identifier)) throw std::invalid_argument("Invalid create stmt! Missing identifier for table name.");
+        consume(token_type::identifier, "Invalid create stmt! Missing identifier for table name.");
 
         e->tblName = previous().literal;
 
-        if (!match(TokenType::parenthesesL)) throw std::invalid_argument("Invalid create stmt! Missing parantheses!");
+        consume(token_type::parenthesesL, "Invalid create stmt! Missing parantheses!");
 
         while (!isDone()) {
-            if (!match(TokenType::identifier)) throw std::invalid_argument("Invalid create stmt! missing column name!");
+            consume(token_type::identifier, "Invalid create stmt! missing column name!");
             std::string_view tblName = previous().literal;
-            if (!match(TokenType::identifier)) throw std::invalid_argument("Invalid create stmt! missing type for column: " + std::string(tblName));
+
+            consume(token_type::identifier, "Invalid create stmt! missing type for column: " + std::string(tblName));
             std::string_view type = previous().literal;
 
             bool canBeNull = false;
-            if (match(TokenType::_not)) {
-                if (!match(TokenType::null)) throw std::invalid_argument("Invalid create stmt! Wtf are you trying to negate.");
+            if (match(token_type::_not)) {
+                consume(token_type::null, "Invalid create stmt! Wtf are you trying to negate.");
                 canBeNull = true;
             }
+
             e->tblColumns.emplace_back(tblName, type, canBeNull);
-            if (match(TokenType::comma)) {
+
+            if (match(token_type::comma)) {
                 continue;
             }
-            if (match(TokenType::parenthesesR)) {
+            if (match(token_type::parenthesesR)) {
                 break;
             }
 
@@ -224,24 +235,26 @@ namespace hivedb {
         return e;
     }
 
-    std::unique_ptr<Expr> Parser::selectExpr() {
-        auto e = binaryExpr();
-        auto s = std::make_unique<SelectExpr>();
-        s->selectExpr = std::move(e);
+    std::unique_ptr<exprs> parser::selectExpr() {
+        auto s = std::make_unique<select_expr>();
+        if (match(token_type::parenthesesL)) {
+            auto e = binaryExpr();
+            s->innerExpr.push_back(std::move(e));
 
-        if (match(TokenType::from)) {
-            if (current().type != TokenType::identifier) {
-                throw std::invalid_argument("Invalid token detected!");
+            while (match(token_type::comma)) {
+                e = binaryExpr();
+                s->innerExpr.push_back(std::move(e));
             }
+            consume(token_type::parenthesesR, "INVALID SELECT STMT");
+        } else {
+            auto e = binaryExpr();
+            s->innerExpr.push_back(std::move(e));
+        }
 
-            if (peek().type == TokenType::dot) {
-                s->tableExpr.databaseName = current().literal;
-                advance();
-                // skip the dot
-                advance();
-            }
+        if (match(token_type::from)) {
+            consume(token_type::identifier, "Invalid select stmt detected! Invalid token detected");
 
-            s->tableExpr.tableName = current().literal;
+            s->tblName = previous().literal;
         }
 
         // TODO: continue for where here
@@ -249,8 +262,8 @@ namespace hivedb {
     }
 
 
-    std::unique_ptr<Expr> Parser::parse() {
-        std::unique_ptr<Expr> e = expr();
+    std::unique_ptr<exprs> parser::parse() {
+        std::unique_ptr<exprs> e = expr();
 
         return e;
     }

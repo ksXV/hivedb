@@ -1,19 +1,13 @@
 #pragma once
 
-#include <string>
+#include <vector>
+#include <string_view>
+#include <memory>
 
 namespace hivedb {
     struct varchar {
-        std::string data;
-
-        explicit varchar(std::string_view str);
-
-        varchar(const varchar&) = delete;
-        varchar& operator=(const varchar&) = delete;
-
-        varchar(varchar&& rhs) = default;
-        varchar& operator=(varchar&& rhs) = default;
-
-        ~varchar() = default;
+        static const std::size_t size = 2 + sizeof(const char*);
+        static void serialize(std::string_view, std::vector<std::byte>&, std::vector<std::unique_ptr<char[]>>&);
+        static std::string_view deserialize(std::byte*);
     };
 }

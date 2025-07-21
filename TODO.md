@@ -1,10 +1,17 @@
 Data types supported:
   - [x] Varchar (with max length of 255)
-  - [ ] Number (default to a float64)
+  - [x] implement float as real
+  - [x] implement int as integer
   - [ ] Boolean
-  - [ ] Binary data
+  - [ ] Binary data?
 
 Parser:
   - [x] Select (partially)
   - [x] Create
-  - [ ] Insert
+  - [x] Insert
+
+
+TODO's for now:
+  - [x] Fix string type
+  - [x] Walk the AST for select
+  - [ ] Implement selectFromTable

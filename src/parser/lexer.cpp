@@ -12,19 +12,19 @@
 namespace hivedb {
 
 using namespace std::literals;
-const std::unordered_map<std::string_view, TokenType> Lexer::reservedKeywords{
-    {"select"sv, TokenType::select},
-    {"from"sv, TokenType::from},
-    {"create"sv, TokenType::create},
-    {"table"sv, TokenType::table},
-    {"not"sv, TokenType::_not},
-    {"null"sv, TokenType::null},
-    {"insert"sv, TokenType::insert},
-    {"into"sv, TokenType::into},
-    {"values"sv, TokenType::values},
+const std::unordered_map<std::string_view, token_type> lexer::reservedKeywords{
+    {"select"sv, token_type::select},
+    {"from"sv, token_type::from},
+    {"create"sv, token_type::create},
+    {"table"sv, token_type::table},
+    {"not"sv, token_type::_not},
+    {"null"sv, token_type::null},
+    {"insert"sv, token_type::insert},
+    {"into"sv, token_type::into},
+    {"values"sv, token_type::values},
 };
 
-Lexer::Lexer(std::string_view input):
+lexer::lexer(std::string_view input):
     m_input{input}, m_position{0}, m_nextPosition{1}, m_current{} {
     if (input.empty()) {
         throw std::invalid_argument("bad input");
@@ -32,72 +32,72 @@ Lexer::Lexer(std::string_view input):
     m_current = input[m_position];
 };
 
-bool Lexer::isLetter(char c) {
+bool lexer::isLetter(char c) {
    return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z');
 }
 
-bool Lexer::isDigit(char c) {
+bool lexer::isDigit(char c) {
    return (c >= '0' && c <= '9');
 }
 
-bool Lexer::isAtEnd() const noexcept {
+bool lexer::isAtEnd() const noexcept {
     if (m_nextPosition > m_input.length()) return true;
     return false;
 }
 
-void Lexer::read() noexcept {
+void lexer::read() noexcept {
         m_current = isAtEnd() ?
                     '\0' : m_input[m_nextPosition];
         m_position = m_nextPosition++;
 }
 
-char Lexer::peek() const noexcept {
+char lexer::peek() const noexcept {
     if (isAtEnd()) return '\0';
     return m_input[m_nextPosition];
 }
 
 
-void Lexer::addToken(TokenType type, std::string_view identifier = "") noexcept {
+void lexer::addToken(token_type type, std::string_view identifier = "") noexcept {
    m_tokens.emplace_back(type, identifier);
 }
 
-void Lexer::nextToken() {
+void lexer::nextToken() {
     assert(!m_input.empty());
 
     switch (m_current) {
         case '(':
-            addToken(TokenType::parenthesesL);
+            addToken(token_type::parenthesesL);
             break;
         case ')':
-            addToken(TokenType::parenthesesR);
+            addToken(token_type::parenthesesR);
             break;
         case '+':
-            addToken(TokenType::add);
+            addToken(token_type::add);
             break;
         case '-':
-            addToken(TokenType::substract);
+            addToken(token_type::substract);
             break;
         case '/':
-            addToken(TokenType::divide);
+            addToken(token_type::divide);
             break;
         case '*':
-            addToken(TokenType::star);
+            addToken(token_type::star);
             break;
         case ',':
-            addToken(TokenType::comma);
+            addToken(token_type::comma);
             break;
         case '.':
-            addToken(TokenType::dot);
+            addToken(token_type::dot);
             break;
         case '!':
-            addToken(TokenType::bang);
+            addToken(token_type::bang);
             break;
         case '\0': [[fallthrough]];
         case ';':
-            addToken(TokenType::eof);
+            addToken(token_type::eof);
             break;
         case '"':
-            addToken(TokenType::quote);
+            parseString();
             break;
 
         case ' ':   [[fallthrough]];
@@ -119,7 +119,7 @@ void Lexer::nextToken() {
     read();
 }
 
-void Lexer::addNumber() {
+void lexer::addNumber() {
     const std::size_t currentPos = m_position;
     while (isDigit(peek())) read();
 
@@ -128,16 +128,33 @@ void Lexer::addNumber() {
 
         const std::string_view number{m_input.c_str() + currentPos, m_position - currentPos + 1};
 
-        addToken(TokenType::real, number);
+        addToken(token_type::real, number);
         return;
     }
 
     const std::string_view number{m_input.c_str() + currentPos, m_position - currentPos + 1};
 
-    addToken(TokenType::integer, number);
+    addToken(token_type::integer, number);
 }
 
-void Lexer::addIdentifier() {
+void lexer::parseString() {
+    //skip the first '"'
+    read();
+
+    const std::size_t currentPos = m_position;
+
+    while (!isAtEnd() && peek() != '\"') {
+        read();
+    }
+    const std::string_view str{m_input.c_str() + currentPos, m_position - currentPos + 1};
+
+    //skip the second "
+    read();
+
+    addToken(token_type::string, str);
+}
+
+void lexer::addIdentifier() {
     const std::size_t currentPos = m_position;
     while (isLetter(peek())) {
         read();
@@ -151,10 +168,10 @@ void Lexer::addIdentifier() {
        return;
     }
 
-    addToken(TokenType::identifier, keyword);
+    addToken(token_type::identifier, keyword);
 }
 
-std::vector<Token> Lexer::getTokens() {
+std::vector<token> lexer::getTokens() {
     while (m_current != '\0') {
         nextToken();
     }

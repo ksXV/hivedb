@@ -17,13 +17,20 @@ FetchContent_Declare(
   GIT_TAG        e69e5f977d458f2650bb346dadf2ad30c5320281) # 10.2.1
 FetchContent_MakeAvailable(fmt)
 
-# TODO: ADD tests/ast.cpp back in here
 add_executable(tests
 tests/lexer.cpp
 tests/parser.cpp
+tests/storage_engine.cpp
+
 src/parser/lexer.cpp
 src/parser/tokens.cpp
 src/parser/parser.cpp
+
+src/storage_engine/storage_engine.cpp
+src/data_types/data_types.cpp
+src/data_types/integer.cpp
+src/data_types/real.cpp
+src/data_types/varchar.cpp
 )
 
 add_executable(hive
@@ -31,6 +38,12 @@ src/main.cpp
 src/parser/lexer.cpp
 src/parser/tokens.cpp
 src/parser/parser.cpp
+
+src/storage_engine/storage_engine.cpp
+src/data_types/data_types.cpp
+src/data_types/integer.cpp
+src/data_types/real.cpp
+src/data_types/varchar.cpp
 )
 
 include_directories(${PROJECT_SOURCE_DIR}/include)

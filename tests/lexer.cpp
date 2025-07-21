@@ -8,17 +8,17 @@
 TEST_CASE("Lexer tests for symbols", "[lexer]") {
     using namespace hivedb;
     constexpr std::string_view input = "(1+1);";
-    Lexer l{input};
+    lexer l{input};
 
-    std::vector<Token> lexerResults = l.getTokens();
+    std::vector<token> lexerResults = l.getTokens();
 
-    const std::array<Token, 6> results {
-        Token{TokenType::parenthesesL},
-        Token{TokenType::integer, "1"},
-        Token{TokenType::add},
-        Token{TokenType::integer, "1"},
-        Token{TokenType::parenthesesR},
-        Token{TokenType::eof},
+    const std::array<token, 6> results {
+        token{token_type::parenthesesL},
+        token{token_type::integer, "1"},
+        token{token_type::add},
+        token{token_type::integer, "1"},
+        token{token_type::parenthesesR},
+        token{token_type::eof},
     };
 
     REQUIRE(!lexerResults.empty());
@@ -34,15 +34,15 @@ TEST_CASE("Lexer tests for symbols", "[lexer]") {
 TEST_CASE("Lexer tests for simple select", "[lexer]") {
     using namespace hivedb;
     constexpr std::string_view input = "select ( + );";
-    Lexer l{input};
-    std::vector<Token> lexerResults = l.getTokens();
+    lexer l{input};
+    std::vector<token> lexerResults = l.getTokens();
 
-    const std::array<Token, 5> results {
-        Token{TokenType::select, "select"},
-        Token{TokenType::parenthesesL},
-        Token{TokenType::add},
-        Token{TokenType::parenthesesR},
-        Token{TokenType::eof}
+    const std::array<token, 5> results {
+        token{token_type::select, "select"},
+        token{token_type::parenthesesL},
+        token{token_type::add},
+        token{token_type::parenthesesR},
+        token{token_type::eof}
     };
 
     REQUIRE(!lexerResults.empty());
@@ -58,19 +58,15 @@ TEST_CASE("Lexer tests for simple select", "[lexer]") {
 TEST_CASE("Lexer tests for select", "[lexer]") {
     using namespace hivedb;
     constexpr std::string_view input = "select \"foo\" from \"bar\";";
-    Lexer l{input};
-    std::vector<Token> lexerResults = l.getTokens();
+    lexer l{input};
+    std::vector<token> lexerResults = l.getTokens();
 
-    const std::array<Token, 9> results {
-        Token{TokenType::select, "select"},
-        Token{TokenType::quote},
-        Token{TokenType::identifier, "foo"},
-        Token{TokenType::quote},
-        Token{TokenType::from, "from"},
-        Token{TokenType::quote},
-        Token{TokenType::identifier, "bar"},
-        Token{TokenType::quote},
-        Token{TokenType::eof}
+    const std::array<token, 5> results {
+        token{token_type::select, "select"},
+        token{token_type::string, "foo"},
+        token{token_type::from, "from"},
+        token{token_type::string, "bar"},
+        token{token_type::eof}
     };
 
     REQUIRE(!lexerResults.empty());
@@ -86,16 +82,16 @@ TEST_CASE("Lexer tests for select", "[lexer]") {
 TEST_CASE("Lexer test for functions", "[lexer]") {
     using namespace hivedb;
     constexpr std::string_view input = "select sum();";
-    Lexer l{input};
+    lexer l{input};
 
-    std::vector<Token> lexerResults = l.getTokens();
+    std::vector<token> lexerResults = l.getTokens();
 
-    const std::array<Token, 5> results {
-        Token{TokenType::select, "select"},
-        Token{TokenType::identifier, "sum"},
-        Token{TokenType::parenthesesL},
-        Token{TokenType::parenthesesR},
-        Token{TokenType::eof},
+    const std::array<token, 5> results {
+        token{token_type::select, "select"},
+        token{token_type::identifier, "sum"},
+        token{token_type::parenthesesL},
+        token{token_type::parenthesesR},
+        token{token_type::eof},
     };
 
     REQUIRE(!lexerResults.empty());
@@ -111,23 +107,17 @@ TEST_CASE("Lexer test for functions", "[lexer]") {
 TEST_CASE("Lexer identifier", "[lexer]") {
     using namespace hivedb;
     constexpr std::string_view input = "\"foo\",\"bar\",\"goo\";";
-    Lexer l{input};
+    lexer l{input};
 
-    std::vector<Token> lexerResults = l.getTokens();
+    std::vector<token> lexerResults = l.getTokens();
 
-    const std::array<Token, 12> results {
-        Token{TokenType::quote},
-        Token{TokenType::identifier, "foo"},
-        Token{TokenType::quote},
-        Token{TokenType::comma},
-        Token{TokenType::quote},
-        Token{TokenType::identifier, "bar"},
-        Token{TokenType::quote},
-        Token{TokenType::comma},
-        Token{TokenType::quote},
-        Token{TokenType::identifier, "goo"},
-        Token{TokenType::quote},
-        Token{TokenType::eof}
+    const std::array<token, 6> results {
+        token{token_type::string, "foo"},
+        token{token_type::comma},
+        token{token_type::string, "bar"},
+        token{token_type::comma},
+        token{token_type::string, "goo"},
+        token{token_type::eof}
     };
 
     REQUIRE(!lexerResults.empty());
@@ -143,25 +133,19 @@ TEST_CASE("Lexer identifier", "[lexer]") {
 TEST_CASE("Lexer identifier with parantheses", "[lexer]") {
     using namespace hivedb;
     constexpr std::string_view input = "(\"foo\",\"bar\",\"goo\");";
-    Lexer l{input};
+    lexer l{input};
 
-    std::vector<Token> lexerResults = l.getTokens();
+    std::vector<token> lexerResults = l.getTokens();
 
-    const std::array<Token, 14> results {
-        Token{TokenType::parenthesesL},
-        Token{TokenType::quote},
-        Token{TokenType::identifier, "foo"},
-        Token{TokenType::quote},
-        Token{TokenType::comma},
-        Token{TokenType::quote},
-        Token{TokenType::identifier, "bar"},
-        Token{TokenType::quote},
-        Token{TokenType::comma},
-        Token{TokenType::quote},
-        Token{TokenType::identifier, "goo"},
-        Token{TokenType::quote},
-        Token{TokenType::parenthesesR},
-        Token{TokenType::eof}
+    const std::array<token, 8> results {
+        token{token_type::parenthesesL},
+        token{token_type::string, "foo"},
+        token{token_type::comma},
+        token{token_type::string, "bar"},
+        token{token_type::comma},
+        token{token_type::string, "goo"},
+        token{token_type::parenthesesR},
+        token{token_type::eof}
     };
 
     REQUIRE(!lexerResults.empty());
@@ -177,15 +161,15 @@ TEST_CASE("Lexer identifier with parantheses", "[lexer]") {
 TEST_CASE("Lexer identifier for database.table", "[lexer]") {
     using namespace hivedb;
     constexpr std::string_view input = "foo.bar;";
-    Lexer l{input};
+    lexer l{input};
 
-    std::vector<Token> lexerResults = l.getTokens();
+    std::vector<token> lexerResults = l.getTokens();
 
-    const std::array<Token, 4> results {
-        Token{TokenType::identifier, "foo"},
-        Token{TokenType::dot},
-        Token{TokenType::identifier, "bar"},
-        Token{TokenType::eof},
+    const std::array<token, 4> results {
+        token{token_type::identifier, "foo"},
+        token{token_type::dot},
+        token{token_type::identifier, "bar"},
+        token{token_type::eof},
     };
 
     REQUIRE(!lexerResults.empty());

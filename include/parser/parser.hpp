@@ -1,9 +1,19 @@
 #pragma once
 
+#include <data_types/integer.hpp>
+#include <data_types/real.hpp>
+#include <data_types/varchar.hpp>
 #include <parser/tokens.hpp>
-#include <memory>
 #include <parser/lexer.hpp>
+
+#include <storage_engine/special_types.hpp>
+
+#include <memory>
 #include <sstream>
+#include <stdexcept>
+#include <string_view>
+#include <type_traits>
+#include <variant>
 
 #define EXPR_INIT(name)                \
 name() = default;                      \
@@ -14,37 +24,165 @@ name& operator=(name&&) = default;     \
 ~name() override = default;
 
 namespace hivedb {
-struct Expr {
+
+template<class... Ts> struct overload : Ts... { using Ts::operator()...; };
+
+template <typename T, typename U>
+concept DifferentMathable = requires(T a, U b) {
+    a += static_cast<T>(b);
+} && !std::is_same_v<T, U> && std::is_arithmetic_v<T> && std::is_arithmetic_v<U>;
+
+template <typename T, typename U>
+concept Mathable = requires(T a, T b) {
+    a += b;
+} && std::is_same_v<T, U> && std::is_arithmetic_v<T>;
+
+template <typename T, typename U>
+concept IsStringView = std::is_same_v<T, std::string_view> || std::is_same_v<U, std::string_view>;
+
+
+struct exprs {
     virtual void prettyPrint(std::stringstream& s) const = 0;
-    virtual ~Expr() = default;
+    virtual void retriveColumns(std::vector<std::string_view>&)= 0;
+
+    using values = std::variant<float, int, std::string_view>;
+
+    [[nodiscard]]
+    virtual std::variant<float, int, std::string_view, std::vector<values>> execute() const = 0;
+
+    [[nodiscard]]
+    virtual std::variant<float, int, std::string_view, std::vector<values>> execute(
+        const fetched_data_map&, std::size_t
+    ) const = 0;
+
+
+    virtual ~exprs() = default;
 };
 
-template <typename T>
-struct LiteralExpr final: public Expr {
-    T value;
 
-    explicit LiteralExpr(T&& v): value(v) {};
+template<typename T>
+concept isValue = std::is_arithmetic_v<T>;
+
+template <typename T, typename U>
+concept DumbConcept1 = (std::is_same_v<T, std::vector<exprs::values>> && isValue<U>);
+
+template <typename T, typename U>
+concept DumbConcept2 = (isValue<T> && std::is_same_v<U, std::vector<exprs::values>>);
+
+
+template <typename T>
+struct literal_expr final: public exprs {
+    T value;
+    bool isIdentifier;
+
+    explicit literal_expr(T&& v, bool isIdntf): value(v), isIdentifier(isIdntf) {};
 
     void prettyPrint(std::stringstream& s) const override {
        s << "( literal: " << value << " )";
     }
-};
 
-struct UnaryExpr final : public Expr {
-    TokenType op{};
-    std::unique_ptr<Expr> rhs{};
-
-    void prettyPrint(std::stringstream& s) const override {
-        if (op == TokenType::bang) s << "!";
-        if (op == TokenType::substract) s << "-";
-        rhs->prettyPrint(s);
+    void retriveColumns(std::vector<std::string_view>& columns) override {
+        if constexpr (std::is_same_v<T, std::string>) {
+            if (isIdentifier) {
+                columns.push_back(value);
+            }
+        }
     }
 
-    EXPR_INIT(UnaryExpr)
+    [[nodiscard]]
+    std::variant<float, int, std::string_view, std::vector<values>> execute() const override {
+        return value;
+    }
+
+    [[nodiscard]]
+    std::variant<float, int, std::string_view, std::vector<values>> execute(
+        const fetched_data_map& fetched_data, std::size_t idx) const override {
+        if constexpr (std::is_same_v<T, std::string>) {
+            if (isIdentifier) {
+                const fetched_columns& clm = fetched_data.find(value)->second[idx];
+                std::variant<float, int, std::string_view, std::vector<values>> clm_value;
+                switch (clm.dt) {
+                    case data_types::integer:
+                            clm_value = integer::deserialize(clm.ptr);
+                            break;
+                    case data_types::real:
+                            clm_value = real::deserialize(clm.ptr);
+                            break;
+                    case data_types::varchar:
+                            clm_value = varchar::deserialize(clm.ptr);
+                            break;
+                    }
+            return clm_value;
+        } else {
+            return value;
+        }
+    } else {
+        return value;
+        }
+    }
 };
 
-struct GroupingExpr final: public Expr {
-    std::unique_ptr<Expr> expr;
+struct unary_expr final : public exprs {
+    token_type op{};
+    std::unique_ptr<exprs> rhs{};
+
+    void prettyPrint(std::stringstream& s) const override {
+        if (op == token_type::bang) s << "!";
+        if (op == token_type::substract) s << "-";
+        rhs->prettyPrint(s);
+    }
+    void retriveColumns(std::vector<std::string_view>& columns) override {
+        rhs->retriveColumns(columns);
+    }
+
+    [[nodiscard]]
+    inline std::variant<float, int, std::string_view, std::vector<values>> solveExprs(
+            std::variant<float, int, std::string_view, std::vector<values>>& expr) const {
+        static auto applyOperator = []<typename T>(T& value) {
+           value = -value;
+        };
+
+        static auto handleStrings = [](std::string_view) {
+            throw std::invalid_argument("Cannot <insert unary operation here> strings!");
+        };
+
+        static auto handleMultipleValues = [](std::vector<values>& value) {
+            if (value.size() != 1) throw std::invalid_argument("Cannot <insert unary operation here> multiple values!");
+            std::visit(overload{
+                applyOperator,
+                handleStrings
+            }, value[0]);
+        };
+
+        std::visit(overload{
+            applyOperator,
+            handleStrings,
+            handleMultipleValues
+        }, expr);
+
+        return expr;
+    }
+
+
+    [[nodiscard]]
+    std::variant<float, int, std::string_view, std::vector<values>> execute() const override {
+        auto expr = rhs->execute();
+        return solveExprs(expr);
+    }
+
+    [[nodiscard]]
+    std::variant<float, int, std::string_view, std::vector<values>> execute(
+        const fetched_data_map& fetched_values, std::size_t idx
+    ) const override {
+        auto expr = rhs->execute(fetched_values, idx);
+        return solveExprs(expr);
+    }
+
+    EXPR_INIT(unary_expr)
+};
+
+struct grouping_expr final: public exprs {
+    std::unique_ptr<exprs> expr;
 
     void prettyPrint(std::stringstream& s) const override {
             s << "( grouping: ";
@@ -52,52 +190,172 @@ struct GroupingExpr final: public Expr {
             s << ")";
     };
 
-    EXPR_INIT(GroupingExpr)
+    void retriveColumns(std::vector<std::string_view>& columns) override {
+        expr->retriveColumns(columns);
+    }
+
+    [[nodiscard]]
+    std::variant<float, int, std::string_view, std::vector<values>> execute() const override {
+        return expr->execute();
+    }
+
+    [[nodiscard]]
+    std::variant<float, int, std::string_view, std::vector<values>> execute(
+        const fetched_data_map& fetched_values, std::size_t idx
+    ) const override {
+        return expr->execute(fetched_values, idx);
+    }
+
+    EXPR_INIT(grouping_expr)
 };
 
-struct BinaryExpr final: public Expr {
-    std::unique_ptr<Expr> lhs;
-    TokenType op{};
-    std::unique_ptr<Expr> rhs;
+
+struct binary_expr final: public exprs {
+    std::unique_ptr<exprs> lhs;
+    token_type op{};
+    std::unique_ptr<exprs> rhs;
 
     void prettyPrint(std::stringstream& s) const override {
         s << "binary: ( ";
         lhs->prettyPrint(s);
-        if (op == TokenType::add) s << " + ";
-        if (op == TokenType::substract) s << " - ";
-        if (op == TokenType::divide) s << " / ";
-        if (op == TokenType::star) s << " * ";
+        if (op == token_type::add) s << " + ";
+        if (op == token_type::substract) s << " - ";
+        if (op == token_type::divide) s << " / ";
+        if (op == token_type::star) s << " * ";
         rhs->prettyPrint(s);
         s << ") ";
     };
 
-    EXPR_INIT(BinaryExpr)
+    void retriveColumns(std::vector<std::string_view>& columns) override {
+        lhs->retriveColumns(columns);
+        rhs->retriveColumns(columns);
+    }
+
+    inline std::variant<float, int, std::string_view, std::vector<values>> solveExprs(
+            std::variant<float, int, std::string_view, std::vector<values>>& leftExpr,
+            std::variant<float, int, std::string_view, std::vector<values>>& rightExpr) const {
+
+        static auto handleSameType = [this]<typename T> requires Mathable<T, T>(T& l, T& r) -> void {
+            if (op == token_type::add) {l+=r; return;}
+            if (op == token_type::substract) {l-=r; return;}
+            if (op == token_type::divide) {l/=r; return;}
+            if (op == token_type::star) {l*=r; return;}
+        };
+
+        static auto handleDifferentTypes = [this]<typename T, typename U> requires DifferentMathable<T, U>(T& l, U& r) -> void{
+            if (op == token_type::add) {l+=static_cast<T>(r); return;}
+            if (op == token_type::substract) {l-=static_cast<T>(r); return;}
+            if (op == token_type::divide) {l/=static_cast<T>(r); return;}
+            if (op == token_type::star) {l*=static_cast<T>(r); return;}
+        };
+
+        static auto handleEitherString = []<typename T, typename U> requires IsStringView<T, U>(T&, U&) -> void {
+            throw std::invalid_argument("Cannot whatever strings.");
+        };
+
+        static auto handleEitherVector1 = [this]<typename T, typename U> requires DumbConcept2<T, U>(T& l, U& r) -> void {
+            if (r.size() != 1) throw std::invalid_argument("Cannot <binary expression> something something.");
+
+            values& rv = r[0];
+
+            static auto handleNumericTypes = [&l, this]<typename V>(V rh){
+                using W = std::decay_t<decltype(l)>;
+                if constexpr(std::is_same_v<W, V>) {
+                    if (op == token_type::add) {l+=rh; return;}
+                    if (op == token_type::substract) {l-=rh; return;}
+                    if (op == token_type::divide) {l/=rh; return;}
+                    if (op == token_type::star) {l*=rh; return;}
+                } else if constexpr(std::is_same_v<W, W>) {
+                    if (op == token_type::add) {l+=static_cast<W>(rh); return;}
+                    if (op == token_type::substract) {l-=static_cast<W>(rh); return;}
+                    if (op == token_type::divide) {l/=static_cast<W>(rh); return;}
+                    if (op == token_type::star) {l*=static_cast<W>(rh); return;}
+                } else {
+                    static_assert(false, "RAAAAAAAAAAAAAAAAAAAAA");
+                }
+            };
+
+            std::visit(overload{
+                handleNumericTypes,
+                [](std::string_view){throw std::invalid_argument("Cannot whatever strings.");}
+            }, rv);
+        };
+
+        static auto handleEitherVector2 = [this]<typename T, typename U> requires DumbConcept1<T, U>(T& l, U r) -> void {
+            if (l.size() != 1) throw std::invalid_argument("Cannot <binary expression> something something.");
+            values& lv = l[0];
+            static auto handleNumericTypes = [&r, this]<typename V>(V lh){
+                using W = std::decay_t<decltype(lh)>;
+                if constexpr(std::is_same_v<W, V>) {
+                    if (op == token_type::add) {lh+=r; return;}
+                    if (op == token_type::substract) {lh-=r; return;}
+                    if (op == token_type::divide) {lh/=r; return;}
+                    if (op == token_type::star) {lh*=r; return;}
+                } else if constexpr(std::is_same_v<W, W>) {
+                    if (op == token_type::add) {lh+=static_cast<W>(r); return;}
+                    if (op == token_type::substract) {lh-=static_cast<W>(r); return;}
+                    if (op == token_type::divide) {lh/=static_cast<W>(r); return;}
+                    if (op == token_type::star) {lh*=static_cast<W>(r); return;}
+                } else {
+                    static_assert(false, "RAAAAAAAAAAAAAAAAAAAAA");
+                }
+            };
+            std::visit(overload{
+                handleNumericTypes,
+                [](std::string_view){throw std::invalid_argument("Cannot whatever strings.");}
+            }, lv);
+        };
+
+        std::visit(overload{
+            handleSameType,
+            handleDifferentTypes,
+            handleEitherString,
+            handleEitherVector1,
+            handleEitherVector2,
+            [](std::vector<values>& l , std::vector<values>& r) -> void {
+                if (l.size() != 1 && r.size() != 1) throw std::invalid_argument("Cannot <binary expression> something something.");
+                std::visit(overload{
+                    handleSameType,
+                    handleDifferentTypes,
+                    handleEitherString,
+                }, l[0], r[0]);
+            },
+        }, leftExpr, rightExpr);
+
+        return leftExpr;
+    }
+
+
+    [[nodiscard]]
+    std::variant<float, int, std::string_view, std::vector<values>> execute(
+        const fetched_data_map& fetched_values, std::size_t idx
+    ) const override {
+        auto leftExpr = lhs->execute(fetched_values, idx);
+        auto rightExpr = rhs->execute(fetched_values, idx);
+
+        return solveExprs(leftExpr, rightExpr);
+    }
+
+    [[nodiscard]]
+    std::variant<float, int, std::string_view, std::vector<values>> execute() const override {
+        auto leftExpr = lhs->execute();
+        auto rightExpr = rhs->execute();
+
+        return solveExprs(leftExpr, rightExpr);
+    }
+
+    EXPR_INIT(binary_expr)
 };
 
-struct CommaExpr final: public Expr {
-    std::unique_ptr<Expr> lhs;
-    std::unique_ptr<Expr> rhs;
-
-    void prettyPrint(std::stringstream& s) const override {
-        s << "comma: (";
-        lhs->prettyPrint(s);
-        s << ", ";
-        rhs->prettyPrint(s);
-        s << ")";
-    };
-
-    EXPR_INIT(CommaExpr)
-};
-
-struct Column {
+struct table_column {
     std::string_view name;
     std::string_view type;
     bool canBeNull;
 };
 
-struct CreateTblExpr final: public Expr {
+struct create_tbl_expr final: public exprs {
     std::string_view tblName;
-    std::vector<Column> tblColumns;
+    std::vector<table_column> tblColumns;
 
     void prettyPrint(std::stringstream& s) const override {
         s << "Table name: " << tblName << "\n";
@@ -107,108 +365,204 @@ struct CreateTblExpr final: public Expr {
         }
     }
 
-    EXPR_INIT(CreateTblExpr)
+    void retriveColumns(std::vector<std::string_view>&) override {
+        throw std::invalid_argument("INVALID CALL!");
+    }
+
+    [[nodiscard]]
+    std::variant<float, int, std::string_view, std::vector<values>> execute() const override {
+        throw std::invalid_argument("INVALID CALL!");
+    }
+
+    [[nodiscard]]
+    std::variant<float, int, std::string_view, std::vector<exprs::values>> execute(
+        const fetched_data_map&, std::size_t
+    ) const override {
+        throw std::invalid_argument("INVALID CALL!");
+    }
+
+    EXPR_INIT(create_tbl_expr)
 };
 
-struct InsertExpr final: public Expr {
+struct insert_expr final: public exprs {
     std::string_view tblName;
+    std::vector<std::variant<std::string_view, int, float>> values;
     std::vector<std::string_view> columns;
-    std::vector<std::string_view> values;
 
     void prettyPrint(std::stringstream& s) const override {
         s << "insert into: " << tblName << "values: \n";
         for (std::size_t i = 0; i < columns.size(); ++i) {
-            s << columns[i] << " value -> " << values[i] << '\n';
+            s << columns[i] << " value -> ";
+            std::visit([&s](auto&& v){s << v;}, values[i]);
+            s << "\n";
         }
     }
 
-    EXPR_INIT(InsertExpr)
+    [[nodiscard]]
+    std::variant<float, int, std::string_view, std::vector<exprs::values>> execute() const override {
+        throw std::invalid_argument("INVALID CALL!");
+    }
+
+    [[nodiscard]]
+    std::variant<float, int, std::string_view, std::vector<exprs::values>> execute(
+        const fetched_data_map&, std::size_t
+    ) const override {
+        throw std::invalid_argument("INVALID CALL!");
+    }
+
+    void retriveColumns(std::vector<std::string_view>&) override {
+        throw std::invalid_argument("INVALID CALL!");
+    }
+
+    EXPR_INIT(insert_expr)
 };
 
-struct SelectExpr final: public Expr {
-   std::unique_ptr<Expr> selectExpr;
-   struct {
-       std::string_view tableName;
-       std::string_view databaseName;
-   } tableExpr;
+struct select_expr final: public exprs {
+   std::vector<std::unique_ptr<exprs>> innerExpr;
+   std::string_view tblName;
 
    // TODO: Replace this later
-   std::unique_ptr<Expr> whereExpr;
+   std::unique_ptr<exprs> whereExpr;
 
    void prettyPrint(std::stringstream& s) const override {
         s << "select: (";
-        selectExpr->prettyPrint(s);
-        s << ")";
-        s << " from table: " << (tableExpr.databaseName.length() ? tableExpr.databaseName : "NULL");
-        s << "." << (tableExpr.tableName.length() ? tableExpr.tableName : "NULL") << "\n";
 
+        for (const auto& expr : innerExpr) {
+            expr->prettyPrint(s);
+            s << ", ";
+        }
+
+        s << ")";
+        s << " from table: " << (tblName.length() ? tblName: "NULL");
         s << "\n";
    };
 
-   EXPR_INIT(SelectExpr)
+   void retriveColumns(std::vector<std::string_view>& columnsTofetch) override {
+       for (auto& exp : innerExpr) {
+          exp->retriveColumns(columnsTofetch);
+       }
+   }
+
+   [[nodiscard]]
+   std::variant<float, int, std::string_view, std::vector<exprs::values>> execute(
+       const fetched_data_map& fetchedValues, std::size_t i
+   ) const override {
+       if (innerExpr.size() == 1) {
+          return innerExpr[0]->execute(fetchedValues, i);
+       }
+
+       std::vector<values> v;
+       for (const auto& expr : innerExpr) {
+           std::visit([&v](auto&& arg){
+               using T = std::decay_t<decltype(arg)>;
+               if constexpr(std::is_same_v<T, std::vector<values>>) {
+                   if (arg.size() != 1) throw std::invalid_argument("An expression cannot return more than 1 value!");
+                   v.push_back(arg[0]);
+               } else {
+                   v.push_back(arg);
+               }
+           }, expr->execute(fetchedValues, i));
+       }
+
+       return v;
+   }
+
+   [[nodiscard]]
+   std::variant<float, int, std::string_view, std::vector<values>> execute() const override {
+        if (innerExpr.size() == 1) {
+           return innerExpr[0]->execute();
+        }
+        std::vector<values> v;
+        for (const auto& expr : innerExpr) {
+            std::visit([&v](auto&& arg){
+                using T = std::decay_t<decltype(arg)>;
+                if constexpr(std::is_same_v<T, std::vector<values>>) {
+                    if (arg.size() != 1) throw std::invalid_argument("An expression cannot return more than 1 value!");
+                    v.push_back(arg[0]);
+                } else {
+                    v.push_back(arg);
+                }
+            }, expr->execute());
+        }
+
+        return v;
+   }
+
+   [[nodiscard]]
+   std::vector<std::string_view> retriveColumnsToBeFetched() const {
+       std::vector<std::string_view> columns;
+
+       for (const auto& expr: innerExpr) {
+           expr->retriveColumns(columns);
+       }
+
+       return columns;
+   }
+
+   EXPR_INIT(select_expr)
 };
 
-class Parser {
+class parser {
    private:
-   std::vector<Token> m_tokens;
+   std::vector<token> m_tokens;
 
    std::size_t m_cursor{0};
 
     [[nodiscard]]
-   inline const Token& peek() const noexcept;
+   inline const token& peek() const noexcept;
     [[nodiscard]]
-   inline const Token& previous() const noexcept;
+   inline const token& previous() const noexcept;
     [[nodiscard]]
-   inline const Token& current() const noexcept;
+   inline const token& current() const noexcept;
 
-   inline const Token& advance() noexcept;
+   inline const token& advance() noexcept;
 
-   template <std::same_as<TokenType>... T>
+   template <std::same_as<token_type>... T>
    bool match(T...) noexcept;
 
     [[nodiscard]]
    inline bool isDone() const noexcept;
     [[nodiscard]]
-   inline bool check(TokenType) const noexcept;
+   inline bool check(token_type) const noexcept;
 
-   inline void consume(TokenType, std::string_view);
-
-    [[nodiscard]]
-   inline std::unique_ptr<Expr> expr();
+   inline void consume(token_type, std::string_view);
 
     [[nodiscard]]
-   inline std::unique_ptr<Expr> commaExpr();
+   inline std::unique_ptr<exprs> expr();
 
     [[nodiscard]]
-   inline std::unique_ptr<Expr> binaryExpr();
+   inline std::unique_ptr<exprs> commaExpr();
 
     [[nodiscard]]
-   inline std::unique_ptr<Expr> unaryExpr();
+   inline std::unique_ptr<exprs> binaryExpr();
 
     [[nodiscard]]
-   inline std::unique_ptr<Expr> primaryExpr();
+   inline std::unique_ptr<exprs> unaryExpr();
 
     [[nodiscard]]
-   inline std::unique_ptr<Expr> selectExpr();
+   inline std::unique_ptr<exprs> primaryExpr();
+
+    [[nodiscard]]
+   inline std::unique_ptr<exprs> selectExpr();
 
    [[nodiscard]]
-   inline std::unique_ptr<Expr> createExpr();
+   inline std::unique_ptr<exprs> createExpr();
 
    [[nodiscard]]
-   inline std::unique_ptr<Expr> insertExpr();
+   inline std::unique_ptr<exprs> insertExpr();
 
    public:
-   explicit Parser(const std::vector<Token>& t);
+   explicit parser(const std::vector<token>& t);
 
-   std::unique_ptr<Expr> parse();
+   std::unique_ptr<exprs> parse();
 
-   Parser(const Parser&) = delete;
-   Parser& operator=(const Parser&) = delete;
+   parser(const parser&) = delete;
+   parser& operator=(const parser&) = delete;
 
-   Parser(Parser&&) = default;
-   Parser& operator=(Parser&&) = default;
+   parser(parser&&) = default;
+   parser& operator=(parser&&) = default;
 
-   ~Parser() = default;
+   ~parser() = default;
 };
 
 }

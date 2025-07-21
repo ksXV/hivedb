@@ -6,7 +6,7 @@
 #include <fmt/format.h>
 
 namespace hivedb {
-enum class TokenType {
+enum class token_type {
     select,
     from,
 
@@ -33,6 +33,7 @@ enum class TokenType {
     dot,
 
     identifier,
+    string,
     integer,
     real,
 
@@ -42,18 +43,18 @@ enum class TokenType {
 };
 
 
-struct Token {
-    TokenType type{};
+struct token {
+    token_type type{};
     std::string_view literal{};
 
-    Token() = default;
-    explicit Token(TokenType t);
-    Token(TokenType t, std::string_view l);
+    token() = default;
+    explicit token(token_type t);
+    token(token_type t, std::string_view l);
 
 
-    friend bool operator==(const Token&, const Token&) noexcept;
+    friend bool operator==(const token&, const token&) noexcept;
 
-    friend std::ostream& operator<<(std::ostream& os, const Token& t);
+    friend std::ostream& operator<<(std::ostream& os, const token& t);
 
     [[nodiscard]] std::string name() const;
 };
@@ -61,8 +62,8 @@ struct Token {
 
 // for fmt::format
 template <>
-struct fmt::formatter<hivedb::Token> : formatter<std::string> {
-    auto format(hivedb::Token t, format_context& ctx) const {
+struct fmt::formatter<hivedb::token> : formatter<std::string> {
+    auto format(hivedb::token t, format_context& ctx) const {
         return formatter<std::string>::format(t.name(), ctx);
     }
 };
