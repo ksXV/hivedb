@@ -31,6 +31,13 @@ src/data_types/data_types.cpp
 src/data_types/integer.cpp
 src/data_types/real.cpp
 src/data_types/varchar.cpp
+        include/buffer_pool/lru_k.hpp
+        src/buffer_pool/lru_k.cpp
+        include/disk/disk_scheduler.hpp
+        include/misc/channel.hpp
+        src/misc/channel.cpp
+        src/disk/disk_scheduler.cpp
+        include/disk/disk_manager.hpp
 )
 
 add_executable(hive
@@ -44,6 +51,14 @@ src/data_types/data_types.cpp
 src/data_types/integer.cpp
 src/data_types/real.cpp
 src/data_types/varchar.cpp
+        include/buffer_pool/lru_k.hpp
+        src/buffer_pool/lru_k.cpp
+        src/buffer_pool/buffer_pool.cpp
+        include/disk/disk_scheduler.hpp
+        include/misc/channel.hpp
+        src/misc/channel.cpp
+        src/disk/disk_scheduler.cpp
+        include/disk/disk_manager.hpp
 )
 
 include_directories(${PROJECT_SOURCE_DIR}/include)
