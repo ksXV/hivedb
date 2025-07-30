@@ -1,49 +1,48 @@
 #pragma once
 
 #include <unordered_map>
-#include <cstddef>
 #include <vector>
 #include <cstdint>
 #include <list>
 
+#include <misc/config.hpp>
 #include <disk/disk_scheduler.hpp>
 #include <buffer_pool/lru_k.hpp>
 
 namespace hivedb {
-    static constexpr std::size_t MAX_PAGE_SIZE = 4096;
-
-    using page_id_t = std::int64_t;
-    using frame_id_t = std::int64_t;
-
     struct frame_header {
-        const frame_id_t frame_id;
+        frame_id_t frame_id;
         bool is_dirty;
     private:
         std::int32_t m_pin_count;
-
-        std::vector<std::byte> m_data;
+        std::vector<char> m_data;
 
     public:
         frame_header() = delete;
-        explicit frame_header(frame_id_t, std::vector<std::byte>&);
+        explicit frame_header(frame_id_t, std::vector<char>&);
 
         frame_header(const frame_header&) = delete;
         frame_header& operator=(const frame_header&) = delete;
 
         frame_header(frame_header&&) = default;
-        frame_header& operator=(frame_header&&) = delete;
+        frame_header& operator=(frame_header&&) = default;
         ~frame_header() = default;
 
         void increase_pin_count();
         void decrease_pin_count();
+
+        [[nodiscard]]
         std::int32_t get_pin_count() const;
 
-        const std::byte* get_data() const;
-        std::byte* get_data();
+        [[nodiscard]]
+        const char* get_data() const;
+
+        [[nodiscard]]
+        char* get_data();
     };
 
+    template<disk_manager_t T>
     struct buffer_pool {
-
     public:
         const frame_id_t max_frames;
     private:
@@ -51,10 +50,11 @@ namespace hivedb {
         std::vector<frame_header> m_frames;
         std::list<frame_id_t> m_empty_frames;
 
-        disk_scheduler m_scheduler;
+        disk_scheduler<T> m_scheduler;
         lru_k m_frame_replacer;
 
-        constexpr auto m_k = 10;
+        static constexpr auto m_k = 10;
+        frame_id_t m_next_frame;
         bool check_for_unpinned_frames();
     public:
         buffer_pool() = delete;

@@ -15,12 +15,12 @@
 #include <type_traits>
 #include <variant>
 
-#define EXPR_INIT(name)                \
-name() = default;                      \
-name(const name&) = delete;            \
-name& operator=(const name&) = delete; \
-name(name&&) = default;                \
-name& operator=(name&&) = default;     \
+#define DEFAULT_CONSTRUCT_REMOVE_COPY_DEFAULT_MOVE(name)                \
+name() = default;                                                       \
+name(const name&) = delete;                                             \
+name& operator=(const name&) = delete;                                  \
+name(name&&) = default;                                                 \
+name& operator=(name&&) = default;                                      \
 ~name() override = default;
 
 namespace hivedb {
@@ -28,17 +28,17 @@ namespace hivedb {
 template<class... Ts> struct overload : Ts... { using Ts::operator()...; };
 
 template <typename T, typename U>
-concept DifferentMathable = requires(T a, U b) {
+concept different_types_somewhat_mathable = requires(T a, U b) {
     a += static_cast<T>(b);
 } && !std::is_same_v<T, U> && std::is_arithmetic_v<T> && std::is_arithmetic_v<U>;
 
 template <typename T, typename U>
-concept Mathable = requires(T a, T b) {
+concept somewhat_mathable = requires(T a, T b) {
     a += b;
 } && std::is_same_v<T, U> && std::is_arithmetic_v<T>;
 
 template <typename T, typename U>
-concept IsStringView = std::is_same_v<T, std::string_view> || std::is_same_v<U, std::string_view>;
+concept is_string_view = std::is_same_v<T, std::string_view> || std::is_same_v<U, std::string_view>;
 
 
 struct exprs {
@@ -61,13 +61,13 @@ struct exprs {
 
 
 template<typename T>
-concept isValue = std::is_arithmetic_v<T>;
+concept is_value = std::is_arithmetic_v<T>;
 
 template <typename T, typename U>
-concept DumbConcept1 = (std::is_same_v<T, std::vector<exprs::values>> && isValue<U>);
+concept is_vector_of_values_and_value = (std::is_same_v<T, std::vector<exprs::values>> && is_value<U>);
 
 template <typename T, typename U>
-concept DumbConcept2 = (isValue<T> && std::is_same_v<U, std::vector<exprs::values>>);
+concept is_value_and_vector_of_values = (is_value<T> && std::is_same_v<U, std::vector<exprs::values>>);
 
 
 template <typename T>
@@ -178,7 +178,7 @@ struct unary_expr final : public exprs {
         return solveExprs(expr);
     }
 
-    EXPR_INIT(unary_expr)
+    DEFAULT_CONSTRUCT_REMOVE_COPY_DEFAULT_MOVE(unary_expr)
 };
 
 struct grouping_expr final: public exprs {
@@ -206,7 +206,7 @@ struct grouping_expr final: public exprs {
         return expr->execute(fetched_values, idx);
     }
 
-    EXPR_INIT(grouping_expr)
+    DEFAULT_CONSTRUCT_REMOVE_COPY_DEFAULT_MOVE(grouping_expr)
 };
 
 
@@ -235,25 +235,25 @@ struct binary_expr final: public exprs {
             std::variant<float, int, std::string_view, std::vector<values>>& leftExpr,
             std::variant<float, int, std::string_view, std::vector<values>>& rightExpr) const {
 
-        static auto handleSameType = [this]<typename T> requires Mathable<T, T>(T& l, T& r) -> void {
+        static auto handleSameType = [this]<typename T> requires somewhat_mathable<T, T>(T& l, T& r) -> void {
             if (op == token_type::add) {l+=r; return;}
             if (op == token_type::substract) {l-=r; return;}
             if (op == token_type::divide) {l/=r; return;}
             if (op == token_type::star) {l*=r; return;}
         };
 
-        static auto handleDifferentTypes = [this]<typename T, typename U> requires DifferentMathable<T, U>(T& l, U& r) -> void{
+        static auto handleDifferentTypes = [this]<typename T, typename U> requires different_types_somewhat_mathable<T, U>(T& l, U& r) -> void{
             if (op == token_type::add) {l+=static_cast<T>(r); return;}
             if (op == token_type::substract) {l-=static_cast<T>(r); return;}
             if (op == token_type::divide) {l/=static_cast<T>(r); return;}
             if (op == token_type::star) {l*=static_cast<T>(r); return;}
         };
 
-        static auto handleEitherString = []<typename T, typename U> requires IsStringView<T, U>(T&, U&) -> void {
+        static auto handleEitherString = []<typename T, typename U> requires is_string_view<T, U>(T&, U&) -> void {
             throw std::invalid_argument("Cannot whatever strings.");
         };
 
-        static auto handleEitherVector1 = [this]<typename T, typename U> requires DumbConcept2<T, U>(T& l, U& r) -> void {
+        static auto handleEitherVector1 = [this]<typename T, typename U> requires is_value_and_vector_of_values<T, U>(T& l, U& r) -> void {
             if (r.size() != 1) throw std::invalid_argument("Cannot <binary expression> something something.");
 
             values& rv = r[0];
@@ -281,7 +281,7 @@ struct binary_expr final: public exprs {
             }, rv);
         };
 
-        static auto handleEitherVector2 = [this]<typename T, typename U> requires DumbConcept1<T, U>(T& l, U r) -> void {
+        static auto handleEitherVector2 = [this]<typename T, typename U> requires is_vector_of_values_and_value<T, U>(T& l, U r) -> void {
             if (l.size() != 1) throw std::invalid_argument("Cannot <binary expression> something something.");
             values& lv = l[0];
             static auto handleNumericTypes = [&r, this]<typename V>(V lh){
@@ -344,13 +344,13 @@ struct binary_expr final: public exprs {
         return solveExprs(leftExpr, rightExpr);
     }
 
-    EXPR_INIT(binary_expr)
+    DEFAULT_CONSTRUCT_REMOVE_COPY_DEFAULT_MOVE(binary_expr)
 };
 
 struct table_column {
     std::string_view name;
     std::string_view type;
-    bool canBeNull;
+    bool can_be_null;
 };
 
 struct create_tbl_expr final: public exprs {
@@ -360,7 +360,7 @@ struct create_tbl_expr final: public exprs {
     void prettyPrint(std::stringstream& s) const override {
         s << "Table name: " << tblName << "\n";
         for (auto& c : tblColumns) {
-            s << "Name: " << c.name << " Type: " << c.type << " Null?: " << c.canBeNull;
+            s << "Name: " << c.name << " Type: " << c.type << " Null?: " << (c.can_be_null ? "yes" : "no");
             s << "\n";
         }
     }
@@ -381,7 +381,7 @@ struct create_tbl_expr final: public exprs {
         throw std::invalid_argument("INVALID CALL!");
     }
 
-    EXPR_INIT(create_tbl_expr)
+    DEFAULT_CONSTRUCT_REMOVE_COPY_DEFAULT_MOVE(create_tbl_expr)
 };
 
 struct insert_expr final: public exprs {
@@ -414,7 +414,7 @@ struct insert_expr final: public exprs {
         throw std::invalid_argument("INVALID CALL!");
     }
 
-    EXPR_INIT(insert_expr)
+    DEFAULT_CONSTRUCT_REMOVE_COPY_DEFAULT_MOVE(insert_expr)
 };
 
 struct select_expr final: public exprs {
@@ -499,7 +499,7 @@ struct select_expr final: public exprs {
        return columns;
    }
 
-   EXPR_INIT(select_expr)
+   DEFAULT_CONSTRUCT_REMOVE_COPY_DEFAULT_MOVE(select_expr)
 };
 
 class parser {

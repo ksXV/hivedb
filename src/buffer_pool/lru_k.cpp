@@ -38,7 +38,7 @@ namespace hivedb {
     std::optional<frame_id_t> lru_k::evict() {
         const auto it = std::find_if(m_current_nodes.begin(), m_current_nodes.end(), [this](const auto& i) {
             const auto& [_, node] = i;
-            return node.is_evictable && node.history.size() < m_k;
+            return node.is_evictable && node.history.size() < static_cast<std::vector<uint64_t>::size_type>(m_k);
         });
 
         if (it != m_current_nodes.end()) {

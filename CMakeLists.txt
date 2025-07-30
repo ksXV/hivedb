@@ -18,26 +18,28 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(fmt)
 
 add_executable(tests
-tests/lexer.cpp
-tests/parser.cpp
-tests/storage_engine.cpp
+tests/parser/lexer.cpp
+tests/parser/parser.cpp
+tests/disk/disk_manager_mock.cpp
+tests/disk/disk_manager.cpp
 
 src/parser/lexer.cpp
 src/parser/tokens.cpp
 src/parser/parser.cpp
 
 src/storage_engine/storage_engine.cpp
+
 src/data_types/data_types.cpp
 src/data_types/integer.cpp
 src/data_types/real.cpp
 src/data_types/varchar.cpp
-        include/buffer_pool/lru_k.hpp
-        src/buffer_pool/lru_k.cpp
-        include/disk/disk_scheduler.hpp
-        include/misc/channel.hpp
-        src/misc/channel.cpp
-        src/disk/disk_scheduler.cpp
-        include/disk/disk_manager.hpp
+
+src/buffer_pool/lru_k.cpp
+src/buffer_pool/buffer_pool.cpp
+
+src/disk/disk_manager.cpp
+src/disk/disk_manager_mock.cpp
+src/misc/temporary_file_wrapper.cpp
 )
 
 add_executable(hive
@@ -51,14 +53,12 @@ src/data_types/data_types.cpp
 src/data_types/integer.cpp
 src/data_types/real.cpp
 src/data_types/varchar.cpp
-        include/buffer_pool/lru_k.hpp
-        src/buffer_pool/lru_k.cpp
-        src/buffer_pool/buffer_pool.cpp
-        include/disk/disk_scheduler.hpp
-        include/misc/channel.hpp
-        src/misc/channel.cpp
-        src/disk/disk_scheduler.cpp
-        include/disk/disk_manager.hpp
+
+src/buffer_pool/lru_k.cpp
+src/buffer_pool/buffer_pool.cpp
+
+src/disk/disk_manager.cpp
+src/disk/disk_manager_mock.cpp
 )
 
 include_directories(${PROJECT_SOURCE_DIR}/include)

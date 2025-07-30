@@ -5,9 +5,9 @@
 #include <unordered_map>
 #include <optional>
 
-namespace hivedb {
-    using frame_id_t = std::int64_t;
+#include <misc/config.hpp>
 
+namespace hivedb {
 	struct lru_k_node {
 		std::vector<std::uint64_t> history;
 		bool is_evictable;

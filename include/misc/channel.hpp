@@ -5,16 +5,15 @@
 #include <condition_variable>
 #include <queue>
 
-#include <disk/disk_scheduler.hpp>
-
 namespace hivedb {
 
+template<typename T>
 struct channel {
 
 private:
     mutable std::mutex m_latch;
     std::condition_variable m_cv;
-    std::queue<disk_request> m_queue;
+    std::queue<T> m_queue;
 
 public:
     channel() = default;
@@ -25,8 +24,21 @@ public:
     channel(channel&&) = delete;
     channel &operator=(channel&&) = delete;
 
-    void put(const disk_request&);
-    disk_request get();
+    void put(const T& req) {
+        std::unique_lock ul{m_latch};
+        m_queue.emplace(req.type, req.data, req.page_id, req.is_done);
+        ul.unlock();
+        m_cv.notify_all();
+    }
+
+    T get() {
+        std::unique_lock ul{m_latch};
+        m_cv.wait(ul, [&] {return !m_queue.empty();});
+        auto req = std::move(m_queue.front());
+        m_queue.pop();
+
+        return req;
+    }
 
     ~channel() = default;
 };

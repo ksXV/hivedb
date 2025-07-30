@@ -4,32 +4,31 @@
 #include <algorithm>
 #include <stdexcept>
 #include <cassert>
-#include <numeric>
 
 #include <buffer_pool/buffer_pool.hpp>
 
 namespace hivedb {
-    frame_header::frame_header(frame_id_t id, std::vector<std::byte>& data)
+    frame_header::frame_header(frame_id_t id, std::vector<char>& data)
     :frame_id(id), is_dirty(false), m_pin_count(0), m_data(std::move(data)) {}
-
     void frame_header::increase_pin_count() {
         m_pin_count += 1;
     }
-
     void frame_header::decrease_pin_count() {
         m_pin_count -= 1;
     }
     std::int32_t frame_header::get_pin_count() const {
        return m_pin_count;
     }
-    const std::byte* frame_header::get_data() const {
+    const char* frame_header::get_data() const {
         return m_data.data();
     }
-    std::byte* frame_header::get_data() {
+    char* frame_header::get_data() {
         return m_data.data();
     }
 
-    buffer_pool::buffer_pool(frame_id_t max_frames): max_frames(max_frames), m_frame_replacer(m_k, max_frames)  {
+    template<disk_manager_t T>
+    buffer_pool<T>::buffer_pool(frame_id_t max_frms):
+    max_frames(max_frms), m_frame_replacer(m_k, max_frames), m_next_frame(0)  {
         if (max_frames < 0) throw std::invalid_argument("max_frames must be >= 0");
 
         m_frames.reserve(max_frames);
@@ -39,13 +38,15 @@ namespace hivedb {
     }
 
 
-    bool buffer_pool::check_for_unpinned_frames() {
+    template<disk_manager_t T>
+    bool buffer_pool<T>::check_for_unpinned_frames() {
         return std::find_if(m_frames.begin(), m_frames.end(), [](const frame_header& frame) {
             return frame.get_pin_count() == 0;
         }) != m_frames.end();
     }
 
-    frame_header& buffer_pool::request_page(page_id_t id) {
+    template<disk_manager_t T>
+    frame_header& buffer_pool<T>::request_page(page_id_t id) {
         if (const auto it = m_page_table.find(id); it != m_page_table.end()) {
             //found our page yippie
             m_frame_replacer.recordAccess(it->second);
@@ -61,15 +62,15 @@ namespace hivedb {
 
         //page fault :(
         //first get the page from the disk
-        std::vector<std::byte> buffer;
-        buffer.reserve(MAX_PAGE_SIZE);
+        std::vector<char> buffer;
+        buffer.reserve(PAGE_SIZE);
         std::promise<bool> is_done_promise;
         auto is_done = is_done_promise.get_future();
 
         disk_request req{
             .type = disk_request_type::read,
-            .page_id = id,
             .data = buffer.data(),
+            .page_id = id,
             .is_done = std::move(is_done_promise)
         };
         m_scheduler.schedule(req);
@@ -148,7 +149,9 @@ namespace hivedb {
         return *inserted_frame;
     }
 
-    bool buffer_pool::flush_pages() {
+
+    template<disk_manager_t T>
+    bool buffer_pool<T>::flush_pages() {
         bool was_any_page_dirty = false;
         for (const auto& frame : m_frames) {
             if (frame.is_dirty) {
@@ -160,7 +163,8 @@ namespace hivedb {
         return was_any_page_dirty;
     }
 
-    bool buffer_pool::flush_page(page_id_t page_id) {
+    template<disk_manager_t T>
+    bool buffer_pool<T>::flush_page(page_id_t page_id) {
         const auto frame_id_it = m_page_table.find(page_id);
         if (frame_id_it == m_page_table.end()) return false;
         auto& frame = m_frames.at(frame_id_it->second);
@@ -171,8 +175,8 @@ namespace hivedb {
 
         disk_request req{
             .type = disk_request_type::write,
-            .page_id = page_id,
             .data = frame.get_data(),
+            .page_id = page_id,
             .is_done = std::move(is_done_promise)
         };
         m_scheduler.schedule(req);
@@ -185,7 +189,8 @@ namespace hivedb {
         return true;
     }
 
-    frame_id_t buffer_pool::evict_page(page_id_t page_id) {
+    template<disk_manager_t T>
+    frame_id_t buffer_pool<T>::evict_page(page_id_t page_id) {
         const auto frame_id_it = m_page_table.find(page_id);
         assert(frame_id_it != m_page_table.end());
         const auto frame_id = frame_id_it->second;
