@@ -7,40 +7,39 @@
 
 namespace hivedb {
 
-template<typename T>
+template <typename T>
 struct channel {
+ private:
+  mutable std::mutex m_latch;
+  std::condition_variable m_cv;
+  std::queue<T> m_queue;
 
-private:
-    mutable std::mutex m_latch;
-    std::condition_variable m_cv;
-    std::queue<T> m_queue;
+ public:
+  channel() = default;
 
-public:
-    channel() = default;
+  channel(const channel &) = delete;
+  channel &operator=(const channel &) = delete;
 
-    channel(const channel&) = delete;
-    channel &operator=(const channel&) = delete;
+  channel(channel &&) = delete;
+  channel &operator=(channel &&) = delete;
 
-    channel(channel&&) = delete;
-    channel &operator=(channel&&) = delete;
+  void put(T &&req) {
+    std::unique_lock ul{m_latch};
+    m_queue.emplace(req.type, req.data, req.page_id, std::move(req.is_done));
+    ul.unlock();
+    m_cv.notify_all();
+  }
 
-    void put(const T& req) {
-        std::unique_lock ul{m_latch};
-        m_queue.emplace(req.type, req.data, req.page_id, req.is_done);
-        ul.unlock();
-        m_cv.notify_all();
-    }
+  T get() {
+    std::unique_lock ul{m_latch};
+    m_cv.wait(ul, [&] { return !m_queue.empty(); });
+    auto req = std::move(m_queue.front());
+    m_queue.pop();
 
-    T get() {
-        std::unique_lock ul{m_latch};
-        m_cv.wait(ul, [&] {return !m_queue.empty();});
-        auto req = std::move(m_queue.front());
-        m_queue.pop();
+    return req;
+  }
 
-        return req;
-    }
-
-    ~channel() = default;
+  ~channel() = default;
 };
 
-} // hivedb
+}  // namespace hivedb

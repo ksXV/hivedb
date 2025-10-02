@@ -25,7 +25,7 @@ TEST_CASE("Disk manager simple tests", "[disk_manager_simple]") {
     }
     REQUIRE(buffer[0] == 0);
 
-    std::memcpy(&buffer[0], page_1_data.data(), hivedb::PAGE_SIZE);
+    std::memcpy(&buffer[0], page_1_data.data(), page_1_data.size());
     manager.write_page(0, &buffer[0]);
     std::memset(&buffer[0], 0, hivedb::PAGE_SIZE);
     manager.read_page(0, &buffer[0]);
@@ -33,7 +33,7 @@ TEST_CASE("Disk manager simple tests", "[disk_manager_simple]") {
 
     constexpr std::string_view page_2_data = "IDONTLOVEJOE!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!";
     std::memset(&buffer[0], 0, hivedb::PAGE_SIZE);
-    std::memcpy(&buffer[0], page_2_data.data(), hivedb::PAGE_SIZE);
+    std::memcpy(&buffer[0], page_2_data.data(), page_2_data.size());
     manager.write_page(1, &buffer[0]);
     std::memset(&buffer[0], 0, hivedb::PAGE_SIZE);
     manager.read_page(1, &buffer[0]);
@@ -42,7 +42,7 @@ TEST_CASE("Disk manager simple tests", "[disk_manager_simple]") {
     //rewrite page_id = 0
     constexpr std::string_view page_3_data = "ILOVEDENVER!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!";
     std::memset(&buffer[0], 0, hivedb::PAGE_SIZE);
-    std::memcpy(&buffer[0], page_3_data.data(), hivedb::PAGE_SIZE);
+    std::memcpy(&buffer[0], page_3_data.data(), page_3_data.size());
     manager.write_page(0, &buffer[0]);
     std::memset(&buffer[0], 0, hivedb::PAGE_SIZE);
     manager.read_page(0, &buffer[0]);

@@ -1,69 +1,67 @@
 #pragma once
 
-#include <string_view>
-
 #include <fmt/core.h>
 #include <fmt/format.h>
 
+#include <string_view>
+
 namespace hivedb {
 enum class token_type {
-    select,
-    from,
+  select,
+  from,
 
-    create,
-    table,
-    _not,
-    null,
+  create,
+  table,
+  _not,
+  null,
 
-    insert,
-    into,
-    values,
+  insert,
+  into,
+  values,
 
-    parenthesesL,
-    parenthesesR,
+  parenthesesL,
+  parenthesesR,
 
-    add,
-    substract,
-    star,
-    divide,
-    bang,
+  add,
+  substract,
+  star,
+  divide,
+  bang,
 
-    quote,
-    comma,
-    dot,
+  quote,
+  comma,
+  dot,
 
-    identifier,
-    string,
-    integer,
-    real,
+  identifier,
+  string,
+  integer,
+  real,
 
-    eof,
+  eof,
 
-    illegal,
+  illegal,
 };
-
 
 struct token {
-    token_type type{};
-    std::string_view literal{};
+  token_type type{};
+  std::string_view literal{};
 
-    token() = default;
-    explicit token(token_type t);
-    token(token_type t, std::string_view l);
+  token() = default;
+  explicit token(token_type t);
+  token(token_type t, std::string_view l);
 
+  friend bool operator==(const token &, const token &) noexcept;
 
-    friend bool operator==(const token&, const token&) noexcept;
+  friend std::ostream &operator<<(std::ostream &os, const token &t);
 
-    friend std::ostream& operator<<(std::ostream& os, const token& t);
-
-    [[nodiscard]] std::string name() const;
+  [[nodiscard]] std::string name() const;
 };
-}
+}  // namespace hivedb
 
 // for fmt::format
 template <>
 struct fmt::formatter<hivedb::token> : formatter<std::string> {
-    auto format(hivedb::token t, format_context& ctx) const {
-        return formatter<std::string>::format(t.name(), ctx);
-    }
+  auto format(hivedb::token t, format_context &ctx) const {
+    return formatter<std::string>::format(t.name(), ctx);
+  }
 };

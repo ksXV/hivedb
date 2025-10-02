@@ -7,11 +7,10 @@
 #include <parser/parser.hpp>
 
 TEST_CASE("Parser", "[Simple select]") {
-    using namespace hivedb;
     try {
         constexpr std::string_view input = "select ( 1 + 1 );";
-        lexer l{input};
-        parser ast{l.getTokens()};
+        hivedb::lexer l{input};
+        hivedb::parser ast{l.getTokens()};
         const auto root = ast.parse();
         std::stringstream stmt;
         root->prettyPrint(stmt);
@@ -24,11 +23,10 @@ TEST_CASE("Parser", "[Simple select]") {
 }
 
 TEST_CASE("Parser", "[Double simple select]") {
-    using namespace hivedb;
     try {
         constexpr std::string_view input = "select(select(select((select(select(69+420))))))";
-        lexer l{input};
-        parser ast{l.getTokens()};
+        hivedb::lexer l{input};
+        hivedb::parser ast{l.getTokens()};
         const auto root = ast.parse();
         std::stringstream stmt;
         root->prettyPrint(stmt);
@@ -41,11 +39,10 @@ TEST_CASE("Parser", "[Double simple select]") {
 }
 
 TEST_CASE("Parser", "[No select]") {
-    using namespace hivedb;
     try {
         constexpr std::string_view input = "(69+420);";
-        lexer l{input};
-        parser ast{l.getTokens()};
+        hivedb::lexer l{input};
+        hivedb::parser ast{l.getTokens()};
         const auto root = ast.parse();
         FAIL("Should not reach here!");
     } catch (const std::exception& error) {
@@ -75,11 +72,10 @@ TEST_CASE("Parser", "[Simple select with identifier]") {
 }
 
 TEST_CASE("Parser", "[Simple select with multiple identifiers]") {
-    using namespace hivedb;
     try {
         constexpr std::string_view input = "select (\"foobar\", \"foo\");";
-        lexer l{input};
-        parser ast{l.getTokens()};
+        hivedb::lexer l{input};
+        hivedb::parser ast{l.getTokens()};
         const auto root = ast.parse();
         std::stringstream stmt;
         root->prettyPrint(stmt);
@@ -92,11 +88,10 @@ TEST_CASE("Parser", "[Simple select with multiple identifiers]") {
 }
 
 TEST_CASE("Parser", "[More complex select with multiple identifiers]") {
-    using namespace hivedb;
     try {
         constexpr std::string_view input = "select (\"foobar\", \"foo\", \"foobarfoo\") from baz;";
-        lexer l{input};
-        parser ast{l.getTokens()};
+        hivedb::lexer l{input};
+        hivedb::parser ast{l.getTokens()};
         const auto root = ast.parse();
         std::stringstream stmt;
         root->prettyPrint(stmt);
@@ -109,8 +104,8 @@ TEST_CASE("Parser", "[More complex select with multiple identifiers]") {
 
     try {
         constexpr std::string_view input = "select (\"foobar\", \"foo\", \"foobarfoo\") from baz;";
-        lexer l{input};
-        parser ast{l.getTokens()};
+        hivedb::lexer l{input};
+        hivedb::parser ast{l.getTokens()};
         const auto root = ast.parse();
         std::stringstream stmt;
         root->prettyPrint(stmt);
@@ -123,11 +118,10 @@ TEST_CASE("Parser", "[More complex select with multiple identifiers]") {
 }
 
 TEST_CASE("Parser", "[create table test]") {
-    using namespace hivedb;
     try {
         constexpr std::string_view input = "create table foo (bar varchar, baffle int, bastard float not null);";
-        lexer l{input};
-        parser ast{l.getTokens()};
+        hivedb::lexer l{input};
+        hivedb::parser ast{l.getTokens()};
         const auto root = ast.parse();
         std::stringstream stmt;
         root->prettyPrint(stmt);
@@ -140,11 +134,10 @@ TEST_CASE("Parser", "[create table test]") {
 }
 
 TEST_CASE("Parser", "[insert table test]") {
-    using namespace hivedb;
     try {
         constexpr std::string_view input = "insert into foo (bar, zar) values (\"bam\", \"vam\");";
-        lexer l{input};
-        parser ast{l.getTokens()};
+        hivedb::lexer l{input};
+        hivedb::parser ast{l.getTokens()};
         const auto root = ast.parse();
         std::stringstream stmt;
         root->prettyPrint(stmt);

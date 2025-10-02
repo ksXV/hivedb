@@ -16,7 +16,7 @@ TEST_CASE("Disk manager mock", "[disk_manager_mock]") {
     manager.read_page(-1, &buffer[0]);
 
     REQUIRE(buffer[0] == 0);
-    std::memcpy(&buffer[0], page_1_data.data(), hivedb::PAGE_SIZE);
+    std::memcpy(&buffer[0], page_1_data.data(), page_1_data.size());
 
     manager.write_page(0, &buffer[0]);
 
@@ -28,7 +28,7 @@ TEST_CASE("Disk manager mock", "[disk_manager_mock]") {
 
     constexpr std::string_view page_2_data = "IDONTLOVEJOE!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!";
     std::memset(&buffer[0], 0, hivedb::PAGE_SIZE);
-    std::memcpy(&buffer[0], page_2_data.data(), hivedb::PAGE_SIZE);
+    std::memcpy(&buffer[0], page_2_data.data(), page_2_data.size());
 
     manager.write_page(1, &buffer[0]);
     std::memset(&buffer[0], 0, hivedb::PAGE_SIZE);
@@ -39,7 +39,7 @@ TEST_CASE("Disk manager mock", "[disk_manager_mock]") {
     //now we rewrite page 1
     constexpr std::string_view page_3_data = "ILOVEDENVER!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!";
     std::memset(&buffer[0], 0, hivedb::PAGE_SIZE);
-    std::memcpy(&buffer[0], page_3_data.data(), hivedb::PAGE_SIZE);
+    std::memcpy(&buffer[0], page_3_data.data(), page_3_data.size());
 
     manager.write_page(0, &buffer[0]);
     std::memset(&buffer[0], 0, hivedb::PAGE_SIZE);

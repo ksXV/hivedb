@@ -7,12 +7,14 @@
 
 
 TEST_CASE("Disk scheduler simple test", "[disk_scheduler]") {
+    using namespace std::chrono_literals;
+
     hivedb::disk_scheduler<hivedb::disk_manager_mock> scheduler{""};
 
     constexpr std::string_view data = "foobar";
     std::array<char, hivedb::PAGE_SIZE> buffer{};
 
-    std::memcpy(&buffer[0], data.data(), hivedb::PAGE_SIZE);
+    std::memcpy(&buffer[0], data.data(), data.size());
 
     std::promise<bool> is_done_write_promise{};
     auto is_done = is_done_write_promise.get_future();
@@ -24,8 +26,7 @@ TEST_CASE("Disk scheduler simple test", "[disk_scheduler]") {
         .is_done = std::move(is_done_write_promise)
     };
 
-    scheduler.schedule(req);
-    using namespace std::chrono_literals;
+    scheduler.schedule(std::move(req));
     std::this_thread::sleep_for(1s);
     REQUIRE(is_done.get());
 
@@ -41,8 +42,7 @@ TEST_CASE("Disk scheduler simple test", "[disk_scheduler]") {
         .is_done = std::move(is_done_read_promise)
     };
 
-    scheduler.schedule(req);
-    using namespace std::chrono_literals;
+    scheduler.schedule(std::move(req));
     std::this_thread::sleep_for(1s);
     REQUIRE(is_done.get());
 

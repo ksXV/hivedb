@@ -1046,3 +1046,5 @@ dkms.conf
 
 .idea/
 .zed/
+.cache/
+cmake-build-debug/
