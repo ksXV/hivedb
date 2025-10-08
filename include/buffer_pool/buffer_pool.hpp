@@ -11,7 +11,6 @@
 #include <list>
 #include <misc/config.hpp>
 #include <numeric>
-#include <print>
 #include <stdexcept>
 #include <unordered_map>
 #include <utility>
@@ -27,9 +26,10 @@ struct frame_header {
  private:
   std::int32_t m_pin_count{-99};
   std::vector<char> m_data;
+  lru_k *m_replacer{nullptr};
 
  public:
-  explicit frame_header(frame_id_t, std::vector<char> &);
+  explicit frame_header(frame_id_t, std::vector<char> &, lru_k *);
 
   frame_header() = default;
   frame_header(const frame_header &) = delete;
@@ -37,7 +37,7 @@ struct frame_header {
 
   frame_header(frame_header &&) = default;
   frame_header &operator=(frame_header &&) = default;
-  ~frame_header() = default;
+  ~frame_header();
 
   void increase_pin_count();
   void decrease_pin_count();
@@ -60,14 +60,14 @@ struct buffer_pool {
  private:
   static constexpr std::int32_t m_k = 10;
 
-  std::unordered_map<page_id_t, frame_id_t> m_page_table;
-  std::vector<frame_header> m_frames;
-  std::list<frame_id_t> m_empty_frames;
-
   disk_scheduler<T> m_scheduler;
   lru_k m_frame_replacer;
 
   page_id_t m_next_page;
+
+  std::unordered_map<page_id_t, frame_id_t> m_page_table;
+  std::vector<frame_header> m_frames;
+  std::list<frame_id_t> m_empty_frames;
 
  public:
   buffer_pool() = delete;
@@ -94,10 +94,10 @@ template <disk_manager_t T>
 buffer_pool<T>::buffer_pool(frame_id_t max_frms,
                             const std::filesystem::path &path)
     : max_frames(max_frms),
-      m_empty_frames(max_frames, 0),
       m_scheduler(path),
       m_frame_replacer(m_k, max_frames),
-      m_next_page(0) {
+      m_next_page(0),
+      m_empty_frames(max_frames, 0) {
   if (max_frames < 0) throw std::invalid_argument("max_frames must be >= 0");
 
   m_frames.resize(max_frames);
@@ -150,7 +150,7 @@ frame_header &buffer_pool<T>::request_page(page_id_t id, bool should_pin) {
     m_empty_frames.pop_front();
 
     ASSERT(m_frames.begin() + frame_id < m_frames.end());
-    m_frames[frame_id] = frame_header{frame_id, buffer};
+    m_frames[frame_id] = frame_header{frame_id, buffer, &m_frame_replacer};
     m_frame_replacer.recordAccess(frame_id);
 
     auto &frame = m_frames[frame_id];
@@ -186,7 +186,7 @@ frame_header &buffer_pool<T>::request_page(page_id_t id, bool should_pin) {
     m_frame_replacer.recordAccess(frame_id);
 
     ASSERT(m_frames.begin() + frame_id < m_frames.end());
-    m_frames[frame_id] = frame_header{frame_id, buffer};
+    m_frames[frame_id] = frame_header{frame_id, buffer, &m_frame_replacer};
     if (should_pin) m_frames[frame_id].increase_pin_count();
 
     m_frame_replacer.recordAccess(frame_id);
@@ -231,7 +231,7 @@ frame_header &buffer_pool<T>::request_page(page_id_t id, bool should_pin) {
   m_empty_frames.pop_front();
 
   ASSERT(m_frames.begin() + freed_frame < m_frames.end());
-  m_frames[freed_frame] = frame_header{freed_frame, buffer};
+  m_frames[freed_frame] = frame_header{freed_frame, buffer, &m_frame_replacer};
   if (should_pin) m_frames[freed_frame].increase_pin_count();
 
   m_frame_replacer.recordAccess(frame_to_evict.value());

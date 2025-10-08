@@ -6,7 +6,7 @@
 #include <string_view>
 
 namespace hivedb {
-enum class token_type {
+enum struct token_type {
   select,
   from,
 

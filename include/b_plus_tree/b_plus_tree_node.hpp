@@ -23,7 +23,7 @@ template <typename T>
 concept value_t = requires(T a, char* buffer) {
   { T::deserialize(buffer) } -> std::same_as<T*>;
 } && std::is_trivially_copy_assignable_v<T>;
-
+  //TODO: remove int64_t at some point
 enum struct b_plus_tree_node_type : std::int64_t { leaf_node, inner_node };
 
 // The structure of a b+tree node is:
@@ -87,20 +87,13 @@ struct b_plus_tree_leaf_node final : public b_plus_tree_node {
       ((hivedb::PAGE_SIZE - (sizeof(std::int64_t) * 4)) /
        (sizeof(K) + sizeof(V)));
 
-  explicit b_plus_tree_leaf_node(char* buffer)
+  explicit b_plus_tree_leaf_node(char* buffer)  // NOLINT
       : b_plus_tree_node(buffer), next_page_id() {
     std::memcpy(&next_page_id, internal_data, sizeof(next_page_id));
     internal_data += sizeof(next_page_id);
   }
 
   void update_buffer_with_new_values() {
-    // std::memcpy(&type, buffer, sizeof(b_plus_tree_node_type));
-    // std::memcpy(&max_size, buffer + sizeof(b_plus_tree_node_type),
-    //             sizeof(b_plus_tree_node_type));
-    // std::memcpy(&current_size, buffer + 2 * sizeof(b_plus_tree_node_type),
-    //             sizeof(b_plus_tree_node_type));
-    // std::memcpy(&next_page_id, buffer + 3 * sizeof(int64),
-    // sizeof(next_page_id));
     std::memcpy(internal_data - sizeof(page_id_t), &next_page_id,
                 sizeof(page_id_t));
     std::memcpy(internal_data - 2 * sizeof(page_id_t), &current_size,
@@ -114,6 +107,7 @@ struct b_plus_tree_leaf_node final : public b_plus_tree_node {
     max_size = MAX_NUMBER_OF_ELEMENTS;
     current_size = 1;
     next_page_id = INVALID_PAGE_ID;
+    type = b_plus_tree_node_type::leaf_node;
     *indexes(0) = key;
     *records(0) = value;
     update_buffer_with_new_values();
@@ -133,6 +127,10 @@ struct b_plus_tree_leaf_node final : public b_plus_tree_node {
 
     std::int64_t high = current_size - 1;
     std::int64_t low = 0;
+
+    if (key > *indexes(high)) {
+      return current_size;
+    }
 
     ASSERT(low < high);
     while (high > low) {
@@ -167,6 +165,8 @@ struct b_plus_tree_leaf_node final : public b_plus_tree_node {
       middle = (high + low) / 2;
     }
 
+    if (*indexes(middle) != key) return std::nullopt;
+
     ASSERT(middle >= 0);
     return static_cast<uint64_t>(middle);
   }
@@ -179,9 +179,9 @@ struct b_plus_tree_leaf_node final : public b_plus_tree_node {
         where_to.has_value() ? where_to.value() : find_index_for_insert(key);
     ASSERT(where_to_insert <= current_size);
 
-    if (where_to_insert == (current_size - 1)) {
-      *indexes(where_to_insert + 1) = key;
-      *records(where_to_insert + 1) = value;
+    if (where_to_insert == current_size) {
+      *indexes(where_to_insert) = key;
+      *records(where_to_insert) = value;
       current_size++;
 
       update_buffer_with_new_values();
@@ -201,14 +201,19 @@ struct b_plus_tree_leaf_node final : public b_plus_tree_node {
   }
 
   void split_node(b_plus_tree_leaf_node& new_node, page_id_t new_page_id) {
+    spdlog::info("Splitting node with page_id {}", new_page_id);
     ASSERT(max_size == current_size);
 
     new_node.type = b_plus_tree_node_type::leaf_node;
     new_node.max_size = current_size;
-    std::memcpy(new_node.indexes(0), indexes(0), max_size / 2);
-    std::memcpy(new_node.records(0), records(0), max_size / 2);
-    std::memcpy(indexes(0), indexes((max_size / 2)), max_size / 2);
-    std::memcpy(records(0), records((max_size / 2)), max_size / 2);
+    std::copy(indexes(max_size/2), indexes(max_size-1), new_node.indexes(0));
+    std::copy(records(max_size/2), records(max_size-1), new_node.records(0));
+
+    *new_node.indexes((max_size/2) - 1) = *indexes(max_size-1);
+    *new_node.records((max_size/2) - 1) = *records(max_size-1);
+
+    std::for_each(indexes(max_size/2), indexes(max_size-1), [] (K& key) {key = K::invalid_key();});
+    std::for_each(records(max_size/2), records(max_size-1), [] (V& val) {val = V::invalid_key();});
 
     current_size = current_size / 2;
     new_node.current_size = current_size;
@@ -228,7 +233,7 @@ struct b_plus_tree_leaf_node final : public b_plus_tree_node {
     ASSERT(index < max_size);
 
     constexpr auto offset = MAX_NUMBER_OF_ELEMENTS * sizeof(K);
-    return V::deserialize(internal_data + offset + (index * sizeof(V)));
+    return V::deserialize(internal_data + offset + index * sizeof(V));
   }
 };
 
@@ -257,20 +262,13 @@ struct b_plus_tree_inner_node final : public b_plus_tree_node {
       ((hivedb::PAGE_SIZE - (sizeof(std::int64_t) * 4)) /
        (sizeof(K) + sizeof(V)));
 
-  explicit b_plus_tree_inner_node(char* buffer)
+  explicit b_plus_tree_inner_node(char* buffer)  // NOLINT
       : b_plus_tree_node(buffer), previous_page_id() {
     std::memcpy(&previous_page_id, internal_data, sizeof(previous_page_id));
     internal_data += sizeof(previous_page_id);
   }
 
   void update_buffer_with_new_values() {
-    // std::memcpy(&type, buffer, sizeof(b_plus_tree_node_type));
-    // std::memcpy(&max_size, buffer + sizeof(b_plus_tree_node_type),
-    //             sizeof(b_plus_tree_node_type));
-    // std::memcpy(&current_size, buffer + 2 * sizeof(b_plus_tree_node_type),
-    //             sizeof(b_plus_tree_node_type));
-    // std::memcpy(&next_page_id, buffer + 3 * sizeof(int64),
-    // sizeof(next_page_id));
     std::memcpy(internal_data - sizeof(page_id_t), &previous_page_id,
                 sizeof(page_id_t));
     std::memcpy(internal_data - 2 * sizeof(page_id_t), &current_size,
@@ -400,7 +398,7 @@ struct b_plus_tree_inner_node final : public b_plus_tree_node {
     std::int64_t high = current_size - 2;
 
     // Handle the case where the last key is "nil" or the invalid one
-    if (key > *indexes(high)) {
+    if (key >= *indexes(high)) {
       return current_size - 1;
     }
 
@@ -408,21 +406,13 @@ struct b_plus_tree_inner_node final : public b_plus_tree_node {
     ASSERT(high >= low);
 
     std::int64_t middle = (high + low) / 2;
-    std::int64_t previous_middle = middle;
-    while (*indexes(middle) != key) {
+    while (high >= low) {
       if (*indexes(middle) > key) {
         high = std::min<std::int64_t>(middle - 1, 0);
       } else {
         low = middle + 1;
       }
       middle = (high + low) / 2;
-
-      if (previous_middle == middle) {
-        ++middle;
-        break;
-      } else {
-        previous_middle = middle;
-      }
     }
 
     ASSERT(middle >= 0);

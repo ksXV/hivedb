@@ -72,15 +72,15 @@ struct b_plus_tree {
         const auto next_key_index = inner_node.find_index(key);
         const auto next_page_id = *inner_node.page_ids(next_key_index);
         previous_page_id = next_page_id.key;
-        this->m_frame_queue.emplace_back(current_page);
+        m_frame_queue.emplace_back(current_page);
         continue;
       } else {
         current_page->is_dirty = true;
         auto leaf_node =
             b_plus_tree_leaf_node<K, V_leaf>(current_page->get_data());
 
-        if (leaf_node.can_insert_trivially()) {
-          leaf_node.trivial_insert(key, value);
+        leaf_node.trivial_insert(key, value);
+        if (!leaf_node.should_split()) {
           return std::nullopt;
         }
 
@@ -89,17 +89,7 @@ struct b_plus_tree {
         new_page->is_dirty = true;
         auto new_leaf_node =
             b_plus_tree_leaf_node<K, V_leaf>(new_page->get_data());
-
-        const auto position_to_insert = leaf_node.find_index(key);
         leaf_node.split_node(new_leaf_node, new_page_id.value());
-        if (position_to_insert > leaf_node.current_size) {
-          new_leaf_node.trivial_insert(
-              key, value,
-              position_to_insert.value() - new_leaf_node.current_size);
-          break;
-        }
-        leaf_node.trivial_insert(key, value, position_to_insert.value());
-
         // new_page->decrease_pin_count();
         break;
       }
@@ -125,6 +115,34 @@ struct b_plus_tree {
     }
 
     auto new_page_id = find_place_for_new_key_and_insert(key, value);
+
+    //leaf page was split, time to create an inner node as a root
+    if (new_page_id.has_value() && m_frame_queue.empty()) {
+        const auto new_root = m_bp.allocate_new_page();
+        auto const new_root_frame = &m_bp.request_page(new_root);
+        new_root_frame->is_dirty = true;
+        auto new_root_node = b_plus_tree_inner_node<K, V>(new_root_frame->get_data());
+
+        //this one will be the right node. look at b_plus_tree_leaf::split()
+        auto const new_frame = &m_bp.request_page(new_page_id.value());
+        auto new_leaf_node = b_plus_tree_leaf_node<K, V_leaf>(new_frame->get_data());
+
+        new_root_node.max_size = b_plus_tree_inner_node<K, V_leaf>::MAX_NUMBER_OF_ELEMENTS;
+        new_root_node.current_size = 2;
+        new_root_node.type = b_plus_tree_node_type::inner_node;
+        new_root_node.previous_page_id = INVALID_PAGE_ID;
+
+        *new_root_node.indexes(0) = *new_leaf_node.indexes(0);
+        *new_root_node.page_ids(0) = V{m_root_page_id};
+
+        *new_root_node.indexes(1) = K::invalid_key();
+        *new_root_node.page_ids(1) = new_page_id.value();
+
+        m_root_page_id = new_root;
+
+        new_root_node.update_buffer_with_new_values();
+        return m_bp.flush_pages();
+    }
 
     while (!m_frame_queue.empty()) {
       if (!new_page_id.has_value()) {
@@ -168,6 +186,8 @@ struct b_plus_tree {
         m_frame_queue.pop_back();
         continue;
       }
+
+      throw std::invalid_argument("SHOULDN T REACH THIS!, yet");
 
       auto old_page_id = new_page_id.value();
       new_page_id = m_bp.allocate_new_page();
