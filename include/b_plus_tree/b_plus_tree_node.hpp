@@ -9,6 +9,7 @@
 #include <libassert/assert.hpp>
 #include <misc/config.hpp>
 #include <optional>
+#include <sstream>
 #include <type_traits>
 
 namespace hivedb {
@@ -17,6 +18,7 @@ concept index_t = requires(T a, T b, char* buffer) {
   { a < b } -> std::same_as<bool>;
   { a != b } -> std::same_as<bool>;
   { T::deserialize(buffer) } -> std::same_as<T*>;
+  { T::invalid_key() } -> std::same_as<T>;
 } && std::is_trivially_copy_assignable_v<T>;
 
 template <typename T>
@@ -34,6 +36,7 @@ enum struct b_plus_tree_node_type : std::int64_t { leaf_node, inner_node };
 // @ 8-16 bytes -> the current size of the node
 // @ 16-24 bytes -> the max size of key-value pairs a node can hold
 struct b_plus_tree_node {
+
   explicit b_plus_tree_node(char* buffer)
       : type(),
         max_size(),
@@ -59,6 +62,7 @@ struct b_plus_tree_node {
   std::uint64_t max_size;
   std::uint64_t current_size;
   char* internal_data;
+
 };
 /*
  * Leaf page format (in order):
@@ -87,10 +91,25 @@ struct b_plus_tree_leaf_node final : public b_plus_tree_node {
       ((hivedb::PAGE_SIZE - (sizeof(std::int64_t) * 4)) /
        (sizeof(K) + sizeof(V)));
 
+  static constexpr auto something_to_be_renamed = (MAX_NUMBER_OF_ELEMENTS + 1) % 2;
   explicit b_plus_tree_leaf_node(char* buffer)  // NOLINT
       : b_plus_tree_node(buffer), next_page_id() {
     std::memcpy(&next_page_id, internal_data, sizeof(next_page_id));
     internal_data += sizeof(next_page_id);
+  }
+
+  void dump_contents() const {
+      std::stringstream ss;
+      ss << "\nleaf_node: [";
+      ss <<"max_size: " << max_size << " ";
+      ss <<"current_size: " << current_size << " ";
+      ss <<"values: ";
+      for (auto i = 0u; i < current_size; ++i) {
+          ss << indexes(i)->to_string() << " ";
+      }
+      ss << "]\n";
+
+      spdlog::info("{}", ss.str());
   }
 
   void update_buffer_with_new_values() {
@@ -202,21 +221,22 @@ struct b_plus_tree_leaf_node final : public b_plus_tree_node {
 
   void split_node(b_plus_tree_leaf_node& new_node, page_id_t new_page_id) {
     spdlog::info("Splitting node with page_id {}", new_page_id);
-    ASSERT(max_size == current_size);
+    ASSERT(should_split());
 
     new_node.type = b_plus_tree_node_type::leaf_node;
     new_node.max_size = current_size;
     std::copy(indexes(max_size/2), indexes(max_size-1), new_node.indexes(0));
     std::copy(records(max_size/2), records(max_size-1), new_node.records(0));
 
-    *new_node.indexes((max_size/2) - 1) = *indexes(max_size-1);
-    *new_node.records((max_size/2) - 1) = *records(max_size-1);
+    //15 26 35 45
+    *new_node.indexes((max_size/2) - something_to_be_renamed) = *indexes(max_size-1);
+    *new_node.records((max_size/2) - something_to_be_renamed) = *records(max_size-1);
 
     std::for_each(indexes(max_size/2), indexes(max_size-1), [] (K& key) {key = K::invalid_key();});
     std::for_each(records(max_size/2), records(max_size-1), [] (V& val) {val = V::invalid_key();});
 
     current_size = current_size / 2;
-    new_node.current_size = current_size;
+    new_node.current_size = current_size + ((something_to_be_renamed+1) % 2);
     next_page_id = new_page_id;
 
     update_buffer_with_new_values();
@@ -261,11 +281,26 @@ struct b_plus_tree_inner_node final : public b_plus_tree_node {
   static constexpr auto MAX_NUMBER_OF_ELEMENTS =
       ((hivedb::PAGE_SIZE - (sizeof(std::int64_t) * 4)) /
        (sizeof(K) + sizeof(V)));
+  static constexpr auto something_to_be_renamed = MAX_NUMBER_OF_ELEMENTS % 2 ? 1 : 2;
 
   explicit b_plus_tree_inner_node(char* buffer)  // NOLINT
       : b_plus_tree_node(buffer), previous_page_id() {
     std::memcpy(&previous_page_id, internal_data, sizeof(previous_page_id));
     internal_data += sizeof(previous_page_id);
+  }
+
+  void dump_contents() const {
+      std::stringstream ss;
+      ss << "\ninner_node: [";
+      ss <<"max_size: " << max_size << " ";
+      ss <<"current_size: " << current_size << " ";
+      ss <<"values: ";
+      for (auto i = 0u; i < current_size; ++i) {
+        ss << "[" << indexes(i)->to_string() << ", " << page_ids(i)->to_string() << "] ";
+      }
+      ss << "]\n";
+
+      spdlog::info("{}", ss.str());
   }
 
   void update_buffer_with_new_values() {
@@ -288,6 +323,39 @@ struct b_plus_tree_inner_node final : public b_plus_tree_node {
     update_buffer_with_new_values();
   }
 
+  std::uint64_t find_index_for_insert(const K& key) const {
+    ASSERT(can_insert_trivially());
+    if (current_size < 5) {
+      std::uint64_t idx = 0;
+      while (idx != (current_size-1)) {
+        if ((*indexes(idx)) > key) break;
+        idx++;
+      }
+
+      return idx;
+    }
+
+    std::int64_t high = current_size - 2;
+    std::int64_t low = 0;
+
+    if (key > *indexes(high)) {
+      return current_size-1;
+    }
+
+    ASSERT(low < high);
+    while (high > low) {
+      std::int64_t middle = (high + low) / 2;
+      if (*indexes(middle) >= key) {
+        high = middle;
+      } else {
+        low = middle + 1;
+      }
+    }
+
+    ASSERT(low >= 0);
+    return static_cast<std::uint64_t>(low);
+  }
+
   template <value_t V_leaf>
   void trivial_insert_leaf_node(const V& value,
                                 b_plus_tree_leaf_node<K, V_leaf>& new_node) {
@@ -295,18 +363,23 @@ struct b_plus_tree_inner_node final : public b_plus_tree_node {
 
     const auto key = *new_node.indexes(0);
 
-    const auto where_to_insert = find_index(key);
+    const auto where_to_insert = find_index_for_insert(key);
 
     if (where_to_insert == (current_size - 1)) {
-      append(key, value);
-      std::swap(*indexes(current_size - 1), *indexes(current_size - 2));
+      *indexes(current_size) = *indexes(current_size-1);
+      *page_ids(current_size) = *page_ids(current_size-1);
+
+      *indexes(current_size-1) = key;
+      *page_ids(current_size-1) = value;
+
       current_size++;
+      std::swap(*page_ids(current_size - 2), *page_ids(current_size-1));
 
       update_buffer_with_new_values();
       return;
     }
 
-    for (auto i = (current_size - 1); i > where_to_insert; --i) {
+    for (auto i = current_size; i > where_to_insert; --i) {
       *indexes(i) = *indexes(i - 1);
       *page_ids(i) = *page_ids(i - 1);
     }
@@ -315,7 +388,7 @@ struct b_plus_tree_inner_node final : public b_plus_tree_node {
     *page_ids(where_to_insert) = value;
 
     ASSERT(where_to_insert + 1 < current_size);
-    std::swap(*page_ids(where_to_insert), *page_ids(where_to_insert + 1));
+    std::swap(*page_ids(where_to_insert), *page_ids(where_to_insert+1));
 
     current_size++;
 
@@ -323,18 +396,23 @@ struct b_plus_tree_inner_node final : public b_plus_tree_node {
   }
 
   void split_node(b_plus_tree_inner_node& new_node, page_id_t previous_page) {
-    ASSERT(max_size == current_size);
+    ASSERT(should_split());
+
 
     new_node.type = b_plus_tree_node_type::inner_node;
     new_node.max_size = max_size;
-    std::memcpy(new_node.indexes(0), indexes(0), max_size / 2);
-    std::memcpy(new_node.page_ids(0), page_ids(0), max_size / 2);
-    std::memcpy(indexes(0), indexes((max_size / 2)), max_size / 2);
-    std::memcpy(page_ids(0), page_ids((max_size / 2)), max_size / 2);
+    std::copy(indexes(max_size/2+1), indexes(max_size-1), new_node.indexes(0));
+    std::copy(page_ids(max_size/2+1), page_ids(max_size-1), new_node.page_ids(0));
 
-    current_size = current_size / 2;
-    new_node.current_size = current_size;
-    previous_page_id = previous_page;
+    *new_node.indexes(max_size/2 - something_to_be_renamed) = *indexes(max_size-1);
+    *new_node.page_ids(max_size/2 - something_to_be_renamed) = *page_ids(max_size-1);
+
+    std::for_each(indexes(max_size/2+1), indexes(max_size-1), [] (K& key) {key = K::invalid_key();});
+    std::for_each(page_ids(max_size/2+1), page_ids(max_size-1), [] (V& val) {val = V::invalid_key();});
+
+    current_size = current_size / 2 + 1;
+    new_node.current_size = current_size - something_to_be_renamed;
+    new_node.previous_page_id = previous_page;
 
     update_buffer_with_new_values();
     new_node.update_buffer_with_new_values();
@@ -344,6 +422,7 @@ struct b_plus_tree_inner_node final : public b_plus_tree_node {
                                  b_plus_tree_inner_node& new_node,
                                  b_plus_tree_inner_node& previous_node) {
     ASSERT(can_insert_trivially());
+    ASSERT(false);
 
     const auto key = *new_node.indexes(0);
 
@@ -405,18 +484,17 @@ struct b_plus_tree_inner_node final : public b_plus_tree_node {
     std::int64_t low = 0;
     ASSERT(high >= low);
 
-    std::int64_t middle = (high + low) / 2;
-    while (high >= low) {
+    while (high > low) {
+      std::int64_t middle = (high + low) / 2;
       if (*indexes(middle) > key) {
-        high = std::min<std::int64_t>(middle - 1, 0);
+        high = middle;
       } else {
         low = middle + 1;
       }
-      middle = (high + low) / 2;
     }
 
-    ASSERT(middle >= 0);
-    return static_cast<uint64_t>(middle);
+    ASSERT(low >= 0);
+    return static_cast<uint64_t>(low);
   }
 
   page_id_t previous_page_id;

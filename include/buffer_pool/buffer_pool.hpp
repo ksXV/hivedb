@@ -86,7 +86,7 @@ struct buffer_pool {
   frame_header &request_page(page_id_t, bool = true);
 
   frame_id_t evict_page(page_id_t);
-  bool flush_page(page_id_t);
+  bool flush_page(page_id_t, bool=true);
   bool flush_pages();
 };
 
@@ -113,6 +113,7 @@ constexpr page_id_t buffer_pool<T>::allocate_new_page() {
 template <disk_manager_t T>
 frame_header &buffer_pool<T>::request_page(page_id_t id, bool should_pin) {
   spdlog::info("Requested page: {}", id);
+  ASSERT(id > -1);
   if (const auto it = m_page_table.find(id); it != m_page_table.end()) {
     // Found our page yippie
     m_frame_replacer.recordAccess(it->second);
@@ -202,7 +203,7 @@ frame_header &buffer_pool<T>::request_page(page_id_t id, bool should_pin) {
                                                    ? frame_to_evict.value()
                                                    : INVALID_FRAME_ID);
 
-  if (!frame_to_evict.has_value() &&
+  if (!frame_to_evict.has_value() ||
       frame_to_evict.value() == INVALID_FRAME_ID) {
     throw std::runtime_error(
         "frame_replacer.evict() failed; got -1 or invalid frame");
@@ -242,18 +243,26 @@ frame_header &buffer_pool<T>::request_page(page_id_t id, bool should_pin) {
 template <disk_manager_t T>
 bool buffer_pool<T>::flush_pages() {
   bool was_any_page_dirty = false;
-  for (const auto &frame : m_frames) {
+  std::vector<page_id_t> pages_to_evict;
+  pages_to_evict.reserve(m_frames.size());
+  for (const auto &[page_id, frame_id]: m_page_table) {
+    auto& frame = m_frames.at(frame_id);
     if (frame.is_dirty) {
       was_any_page_dirty = true;
-      flush_page(frame.frame_id);
+      flush_page(page_id, false);
+      pages_to_evict.push_back(page_id);
     }
   }
+
+  std::for_each(pages_to_evict.begin(),
+    pages_to_evict.end(),
+    [this](const auto &page) {evict_page(page);});
 
   return was_any_page_dirty;
 }
 
 template <disk_manager_t T>
-bool buffer_pool<T>::flush_page(page_id_t page_id) {
+bool buffer_pool<T>::flush_page(page_id_t page_id, bool should_evict) {
   spdlog::info("Flushing page {}", page_id);
   const auto frame_id_it = m_page_table.find(page_id);
   if (frame_id_it == m_page_table.end()) return false;
@@ -274,9 +283,11 @@ bool buffer_pool<T>::flush_page(page_id_t page_id) {
     throw std::runtime_error("flush_page() failed; tried to write");
   frame.decrease_pin_count();
 
-  const auto frame_to_free = frame.frame_id;
-  const auto freed_frame = evict_page(page_id);
-  ASSERT(frame_to_free == freed_frame);
+  if (should_evict) {
+      const auto frame_to_free = frame.frame_id;
+      const auto freed_frame = evict_page(page_id);
+      ASSERT(frame_to_free == freed_frame);
+  }
 
   return true;
 }

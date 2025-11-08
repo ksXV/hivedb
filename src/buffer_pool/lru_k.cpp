@@ -81,7 +81,7 @@ std::optional<frame_id_t> lru_k::evict() {
 
   // sanity check
   if (id == INVALID_FRAME_ID) {
-    spdlog::warn("COULDN'T FIND FRAME TO EVICT!");
+    spdlog::error("COULDN'T FIND FRAME TO EVICT!");
     return std::nullopt;
   }
 

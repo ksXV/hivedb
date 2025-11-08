@@ -4,7 +4,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-add_compile_options(-pedantic -fno-strict-aliasing -Wall -Wextra -Werror -g -O0 -ggdb)
+add_compile_options(-pedantic -fno-strict-aliasing -Wall -Wextra -Werror -O0 -g -ggdb)
 
 add_compile_options(-fsanitize=address)
 add_link_options(-fsanitize=address)
