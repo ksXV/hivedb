@@ -15,14 +15,25 @@ frame_header::frame_header(frame_id_t id, std::vector<char> &data,
       m_pin_count(0),
       m_data(std::move(data)),
       m_replacer(replacer) {}
-void frame_header::increase_pin_count() { m_pin_count += 1; }
-void frame_header::decrease_pin_count() { m_pin_count -= 1; }
+
+void frame_header::increase_pin_count() {
+  m_pin_count += 1;
+  if (m_replacer && m_pin_count > 0) {
+    m_replacer->setEvictable(frame_id, false);
+  }
+}
+
+void frame_header::decrease_pin_count() {
+  if (m_pin_count > 0) {
+    m_pin_count -= 1;
+    if (m_replacer && m_pin_count == 0) {
+      m_replacer->setEvictable(frame_id, true);
+    }
+  }
+}
+
 std::int32_t frame_header::get_pin_count() const { return m_pin_count; }
 const char *frame_header::get_data() const { return m_data.data(); }
 char *frame_header::get_data() { return m_data.data(); }
-frame_header::~frame_header() {
-  if (m_replacer) {
-    m_replacer->setEvictable(frame_id, true);
-  }
-}
+frame_header::~frame_header() {}
 }  // namespace hivedb

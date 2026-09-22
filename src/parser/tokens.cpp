@@ -1,9 +1,12 @@
 #include <iostream>
 #include <parser/tokens.hpp>
+#include <string>
+#include <string_view>
 
 namespace hivedb {
 
-token::token(token_type t) : type(t), literal() {}
+token::token(token_type t) : type(t) {}
+
 token::token(token_type t, std::string_view l) : type(t), literal(l) {}
 
 bool operator==(const token &lhs, const token &rhs) noexcept {
@@ -26,6 +29,8 @@ static constexpr std::string_view getTokenType(token_type t) {
       return "select";
     case token_type::from:
       return "from";
+    case token_type::where:
+      return "where";
     case token_type::identifier:
       return "identifier";
     case token_type::quote:
@@ -38,26 +43,57 @@ static constexpr std::string_view getTokenType(token_type t) {
       return "dot";
     case token_type::string:
       return "string";
+    case token_type::substract:
+      return "substract";
+    case token_type::star:
+      return "star";
+    case token_type::divide:
+      return "divide";
+    case token_type::create:
+      return "create";
+    case token_type::table:
+      return "table";
+    case token_type::_not:
+      return "not";
+    case token_type::null:
+      return "null";
+    case token_type::insert:
+      return "insert";
+    case token_type::into:
+      return "into";
+    case token_type::values:
+      return "values";
+    case token_type::_and:
+      return "and";
+    case token_type::_or:
+      return "or";
+    case token_type::equal:
+      return "equal";
+    case token_type::not_equal:
+      return "not_equal";
+    case token_type::less:
+      return "less";
+    case token_type::greater:
+      return "greater";
+    case token_type::less_equal:
+      return "less_equal";
+    case token_type::greater_equal:
+      return "greater_equal";
+    case token_type::integer:
+      return "integer";
+    case token_type::real:
+      return "real";
     default:
-      return "unknown yet";
+      return "unknown";
   }
 }
 
 std::ostream &operator<<(std::ostream &os, const token &t) {
-  os << "{ ";
-  if (!t.literal.empty()) {
-    os << t.literal << " ";
-  }
-  os << getTokenType(t.type);
-  os << " }";
+  os << "Token: " << getTokenType(t.type) << " | " << t.literal;
   return os;
 }
 
 std::string token::name() const {
-  if (literal.empty()) {
-    return std::string{getTokenType(type)};
-  }
-
-  return std::string{literal} + " " + std::string{getTokenType(type)};
+  return std::string{getTokenType(this->type)};
 }
 }  // namespace hivedb

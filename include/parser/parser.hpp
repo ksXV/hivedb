@@ -1,29 +1,38 @@
 #pragma once
 
-#include <data_types/integer.hpp>
-#include <data_types/real.hpp>
-#include <data_types/varchar.hpp>
+#include <fmt/core.h>
+
+#include <algorithm>
+#include <concepts>
+#include <cstdint>
+#include <exception>
 #include <memory>
-#include <parser/lexer.hpp>
 #include <parser/tokens.hpp>
 #include <sstream>
 #include <stdexcept>
-#include <storage_engine/special_types.hpp>
+#include <string>
 #include <string_view>
 #include <type_traits>
+#include <unordered_map>
 #include <variant>
+#include <vector>
 
-#define DEFAULT_CONSTRUCT_REMOVE_COPY_DEFAULT_MOVE(name) \
-  name() = default;                                      \
-  name(const name &) = delete;                           \
-  name &operator=(const name &) = delete;                \
-  name(name &&) = default;                               \
-  name &operator=(name &&) = default;                    \
-  ~name() override = default;
+#include <data_types/data_types.hpp>
+#include <data_types/integer.hpp>
+#include <data_types/real.hpp>
+#include <data_types/varchar.hpp>
+#include <storage_engine/special_types.hpp>
 
 namespace hivedb {
 
-template <typename... Ts>
+#define DEFAULT_CONSTRUCT_REMOVE_COPY_DEFAULT_MOVE(class_name) \
+  class_name() = default;                                     \
+  class_name(const class_name &) = delete;                    \
+  class_name &operator=(const class_name &) = delete;         \
+  class_name(class_name &&) = default;                        \
+  class_name &operator=(class_name &&) = default;
+
+template <class... Ts>
 struct overload : Ts... {
   using Ts::operator()...;
 };
@@ -97,7 +106,8 @@ struct literal_expr final : public exprs {
 
   [[nodiscard]]
   std::variant<float, int, std::string_view, std::vector<values>> execute(
-      const fetched_data_map &fetched_data, std::size_t idx) const override {
+      [[maybe_unused]] const fetched_data_map &fetched_data,
+      [[maybe_unused]] std::size_t idx) const override {
     if constexpr (std::is_same_v<T, std::string>) {
       if (isIdentifier) {
         const fetched_columns &clm = fetched_data.find(value)->second[idx];
@@ -113,10 +123,13 @@ struct literal_expr final : public exprs {
           case data_types::varchar:
             clm_value = varchar::deserialize(clm.ptr);
             break;
+          default:
+            throw std::invalid_argument("Unknown data type detected!");
         }
+
         return clm_value;
       } else {
-        return value;
+        return std::string_view{value};
       }
     } else {
       return value;
@@ -130,6 +143,7 @@ struct unary_expr final : public exprs {
 
   void prettyPrint(std::stringstream &s) const override {
     if (op == token_type::bang) s << "!";
+    if (op == token_type::_not) s << "NOT ";
     if (op == token_type::substract) s << "-";
     rhs->prettyPrint(s);
   }
@@ -138,20 +152,30 @@ struct unary_expr final : public exprs {
   }
 
   [[nodiscard]]
-  inline std::variant<float, int, std::string_view, std::vector<values>>
+  std::variant<float, int, std::string_view, std::vector<values>>
   solveExprs(std::variant<float, int, std::string_view, std::vector<values>>
                  &expr) const {
-    static auto applyOperator = []<typename T>(T &value) { value = -value; };
+    const auto applyOperator = [this]<typename T>(T &value) {
+      if (op == token_type::bang || op == token_type::_not) {
+        if constexpr (std::is_integral_v<T>) {
+          value = (value == 0 ? 1 : 0);
+        } else if constexpr (std::is_floating_point_v<T>) {
+          value = (value == 0.0f ? 1.0f : 0.0f);
+        }
+      } else if (op == token_type::substract) {
+        value = -value;
+      }
+    };
 
     static auto handleStrings = [](std::string_view) {
       throw std::invalid_argument(
-          "Cannot <insert unary operation here> strings!");
+          "Cannot apply unary operator to string value");
     };
 
-    static auto handleMultipleValues = [](std::vector<values> &value) {
+    const auto handleMultipleValues = [this, &applyOperator](std::vector<values> &value) {
       if (value.size() != 1)
         throw std::invalid_argument(
-            "Cannot <insert unary operation here> multiple values!");
+            "Unary operator requires a single scalar value, but got multiple values");
       std::visit(overload{applyOperator, handleStrings}, value[0]);
     };
 
@@ -206,6 +230,31 @@ struct grouping_expr final : public exprs {
   DEFAULT_CONSTRUCT_REMOVE_COPY_DEFAULT_MOVE(grouping_expr)
 };
 
+struct wildcard_expr final : public exprs {
+  void prettyPrint(std::stringstream &s) const override {
+    s << "*";
+  }
+
+  void retriveColumns(std::vector<std::string_view> &columns) override {
+    columns.emplace_back("*");
+  }
+
+  [[nodiscard]]
+  std::variant<float, int, std::string_view, std::vector<values>> execute()
+      const override {
+    return std::string_view{"*"};
+  }
+
+  [[nodiscard]]
+  std::variant<float, int, std::string_view, std::vector<values>> execute(
+      [[maybe_unused]] const fetched_data_map &,
+      [[maybe_unused]] std::size_t) const override {
+    return std::string_view{"*"};
+  }
+
+  DEFAULT_CONSTRUCT_REMOVE_COPY_DEFAULT_MOVE(wildcard_expr)
+};
+
 struct binary_expr final : public exprs {
   std::unique_ptr<exprs> lhs;
   token_type op{};
@@ -215,9 +264,17 @@ struct binary_expr final : public exprs {
     s << "binary: ( ";
     lhs->prettyPrint(s);
     if (op == token_type::add) s << " + ";
-    if (op == token_type::substract) s << " - ";
-    if (op == token_type::divide) s << " / ";
-    if (op == token_type::star) s << " * ";
+    else if (op == token_type::substract) s << " - ";
+    else if (op == token_type::divide) s << " / ";
+    else if (op == token_type::star) s << " * ";
+    else if (op == token_type::equal) s << " = ";
+    else if (op == token_type::not_equal) s << " != ";
+    else if (op == token_type::less) s << " < ";
+    else if (op == token_type::greater) s << " > ";
+    else if (op == token_type::less_equal) s << " <= ";
+    else if (op == token_type::greater_equal) s << " >= ";
+    else if (op == token_type::_and) s << " AND ";
+    else if (op == token_type::_or) s << " OR ";
     rhs->prettyPrint(s);
     s << ") ";
   };
@@ -232,186 +289,102 @@ struct binary_expr final : public exprs {
       std::variant<float, int, std::string_view, std::vector<values>> &leftExpr,
       std::variant<float, int, std::string_view, std::vector<values>>
           &rightExpr) const {
-    static auto handleSameType = [this]<typename T>
-      requires somewhat_mathable<T, T>
-    (T & l, T & r) -> void {
-      if (op == token_type::add) {
-        l += r;
-        return;
-      }
-      if (op == token_type::substract) {
-        l -= r;
-        return;
-      }
-      if (op == token_type::divide) {
-        l /= r;
-        return;
-      }
-      if (op == token_type::star) {
-        l *= r;
-        return;
-      }
-    };
-
-    static auto handleDifferentTypes = [this]<typename T, typename U>
-      requires different_types_somewhat_mathable<T, U>
-    (T & l, U & r) -> void {
-      if (op == token_type::add) {
-        l += static_cast<T>(r);
-        return;
-      }
-      if (op == token_type::substract) {
-        l -= static_cast<T>(r);
-        return;
-      }
-      if (op == token_type::divide) {
-        l /= static_cast<T>(r);
-        return;
-      }
-      if (op == token_type::star) {
-        l *= static_cast<T>(r);
-        return;
-      }
-    };
-
-    static auto handleEitherString = []<typename T, typename U>
-      requires is_string_view<T, U>
-    (T &, U &) -> void {
-      throw std::invalid_argument("Cannot whatever strings.");
-    };
-
-    static auto handleEitherVector1 = [this]<typename T, typename U>
-      requires is_value_and_vector_of_values<T, U>
-    (T & l, U & r) -> void {
-      if (r.size() != 1)
+    if (auto *lv = std::get_if<std::vector<values>>(&leftExpr)) {
+      if (lv->size() != 1) {
         throw std::invalid_argument(
-            "Cannot <binary expression> something something.");
+            "Binary operation requires scalar operands, but operand contains multiple values");
+      }
+      std::variant<float, int, std::string_view, std::vector<values>> lScalar;
+      std::visit([&](auto &&val) { lScalar = val; }, (*lv)[0]);
+      leftExpr = solveExprs(lScalar, rightExpr);
+      return leftExpr;
+    }
 
-      values &rv = r[0];
-
-      static auto handleNumericTypes = [&l, this]<typename V>(V rh) {
-        using W = std::decay_t<decltype(l)>;
-        if constexpr (std::is_same_v<W, V>) {
-          if (op == token_type::add) {
-            l += rh;
-            return;
-          }
-          if (op == token_type::substract) {
-            l -= rh;
-            return;
-          }
-          if (op == token_type::divide) {
-            l /= rh;
-            return;
-          }
-          if (op == token_type::star) {
-            l *= rh;
-            return;
-          }
-        } else if constexpr (std::is_same_v<W, W>) {
-          if (op == token_type::add) {
-            l += static_cast<W>(rh);
-            return;
-          }
-          if (op == token_type::substract) {
-            l -= static_cast<W>(rh);
-            return;
-          }
-          if (op == token_type::divide) {
-            l /= static_cast<W>(rh);
-            return;
-          }
-          if (op == token_type::star) {
-            l *= static_cast<W>(rh);
-            return;
-          }
-        } else {
-          static_assert(false, "RAAAAAAAAAAAAAAAAAAAAA");
-        }
-      };
-
-      std::visit(
-          overload{handleNumericTypes,
-                   [](std::string_view) {
-                     throw std::invalid_argument("Cannot whatever strings.");
-                   }},
-          rv);
-    };
-
-    static auto handleEitherVector2 = [this]<typename T, typename U>
-      requires is_vector_of_values_and_value<T, U>
-    (T & l, U r) -> void {
-      if (l.size() != 1)
+    if (auto *rv = std::get_if<std::vector<values>>(&rightExpr)) {
+      if (rv->size() != 1) {
         throw std::invalid_argument(
-            "Cannot <binary expression> something something.");
-      values &lv = l[0];
-      static auto handleNumericTypes = [&r, this]<typename V>(V lh) {
-        using W = std::decay_t<decltype(lh)>;
-        if constexpr (std::is_same_v<W, V>) {
-          if (op == token_type::add) {
-            lh += r;
-            return;
-          }
-          if (op == token_type::substract) {
-            lh -= r;
-            return;
-          }
-          if (op == token_type::divide) {
-            lh /= r;
-            return;
-          }
-          if (op == token_type::star) {
-            lh *= r;
-            return;
-          }
-        } else if constexpr (std::is_same_v<W, W>) {
-          if (op == token_type::add) {
-            lh += static_cast<W>(r);
-            return;
-          }
-          if (op == token_type::substract) {
-            lh -= static_cast<W>(r);
-            return;
-          }
-          if (op == token_type::divide) {
-            lh /= static_cast<W>(r);
-            return;
-          }
-          if (op == token_type::star) {
-            lh *= static_cast<W>(r);
-            return;
-          }
+            "Binary operation requires scalar operands, but operand contains multiple values");
+      }
+      std::variant<float, int, std::string_view, std::vector<values>> rScalar;
+      std::visit([&](auto &&val) { rScalar = val; }, (*rv)[0]);
+      return solveExprs(leftExpr, rScalar);
+    }
+
+    const auto handleMathAndComparison = [&leftExpr, this]<typename T, typename U>(const T &l, const U &r) {
+      if constexpr (std::is_same_v<T, std::vector<values>> || std::is_same_v<U, std::vector<values>>) {
+        return;
+      } else if constexpr (std::is_same_v<T, std::string_view> && std::is_same_v<U, std::string_view>) {
+        if (op == token_type::equal) {
+          leftExpr = (l == r ? 1 : 0);
+        } else if (op == token_type::not_equal) {
+          leftExpr = (l != r ? 1 : 0);
+        } else if (op == token_type::less) {
+          leftExpr = (l < r ? 1 : 0);
+        } else if (op == token_type::less_equal) {
+          leftExpr = (l <= r ? 1 : 0);
+        } else if (op == token_type::greater) {
+          leftExpr = (l > r ? 1 : 0);
+        } else if (op == token_type::greater_equal) {
+          leftExpr = (l >= r ? 1 : 0);
         } else {
-          static_assert(false, "RAAAAAAAAAAAAAAAAAAAAA");
+          throw std::invalid_argument("Cannot apply binary arithmetic operations to string values");
         }
-      };
-      std::visit(
-          overload{handleNumericTypes,
-                   [](std::string_view) {
-                     throw std::invalid_argument("Cannot whatever strings.");
-                   }},
-          lv);
+      } else if constexpr (std::is_same_v<T, std::string_view> || std::is_same_v<U, std::string_view>) {
+        if (op == token_type::equal) {
+          leftExpr = 0;
+        } else if (op == token_type::not_equal) {
+          leftExpr = 1;
+        } else {
+          throw std::invalid_argument("Cannot compare or perform arithmetic between string and numeric values");
+        }
+      } else if constexpr (std::is_arithmetic_v<T> && std::is_arithmetic_v<U>) {
+        if (op == token_type::add) {
+          if constexpr (std::is_same_v<T, float> || std::is_same_v<U, float>) {
+            leftExpr = static_cast<float>(l) + static_cast<float>(r);
+          } else {
+            leftExpr = static_cast<int>(l) + static_cast<int>(r);
+          }
+        } else if (op == token_type::substract) {
+          if constexpr (std::is_same_v<T, float> || std::is_same_v<U, float>) {
+            leftExpr = static_cast<float>(l) - static_cast<float>(r);
+          } else {
+            leftExpr = static_cast<int>(l) - static_cast<int>(r);
+          }
+        } else if (op == token_type::star) {
+          if constexpr (std::is_same_v<T, float> || std::is_same_v<U, float>) {
+            leftExpr = static_cast<float>(l) * static_cast<float>(r);
+          } else {
+            leftExpr = static_cast<int>(l) * static_cast<int>(r);
+          }
+        } else if (op == token_type::divide) {
+          if constexpr (std::is_same_v<T, float> || std::is_same_v<U, float>) {
+            leftExpr = static_cast<float>(l) / static_cast<float>(r);
+          } else {
+            leftExpr = static_cast<int>(l) / static_cast<int>(r);
+          }
+        } else if (op == token_type::equal) {
+          leftExpr = (l == r ? 1 : 0);
+        } else if (op == token_type::not_equal) {
+          leftExpr = (l != r ? 1 : 0);
+        } else if (op == token_type::less) {
+          leftExpr = (l < r ? 1 : 0);
+        } else if (op == token_type::less_equal) {
+          leftExpr = (l <= r ? 1 : 0);
+        } else if (op == token_type::greater) {
+          leftExpr = (l > r ? 1 : 0);
+        } else if (op == token_type::greater_equal) {
+          leftExpr = (l >= r ? 1 : 0);
+        } else if (op == token_type::_and) {
+          leftExpr = ((l != 0 && r != 0) ? 1 : 0);
+        } else if (op == token_type::_or) {
+          leftExpr = ((l != 0 || r != 0) ? 1 : 0);
+        }
+      }
     };
 
     std::visit(
-        overload{
-            handleSameType,
-            handleDifferentTypes,
-            handleEitherString,
-            handleEitherVector1,
-            handleEitherVector2,
-            [](std::vector<values> &l, std::vector<values> &r) -> void {
-              if (l.size() != 1 && r.size() != 1)
-                throw std::invalid_argument(
-                    "Cannot <binary expression> something something.");
-              std::visit(
-                  overload{
-                      handleSameType,
-                      handleDifferentTypes,
-                      handleEitherString,
-                  },
-                  l[0], r[0]);
-            },
+        [&](const auto &l, const auto &r) {
+          handleMathAndComparison(l, r);
         },
         leftExpr, rightExpr);
 
@@ -453,25 +426,24 @@ struct create_tbl_expr final : public exprs {
     s << "Table name: " << tblName << "\n";
     for (auto &c : tblColumns) {
       s << "Name: " << c.name << " Type: " << c.type
-        << " Null?: " << (c.can_be_null ? "yes" : "no");
-      s << "\n";
+        << " Can be null: " << (c.can_be_null ? "true" : "false") << "\n";
     }
-  }
+  };
 
   void retriveColumns(std::vector<std::string_view> &) override {
-    throw std::invalid_argument("INVALID CALL!");
+    throw std::invalid_argument("Statement cannot be directly evaluated; must be executed by storage engine");
   }
 
   [[nodiscard]]
   std::variant<float, int, std::string_view, std::vector<values>> execute()
       const override {
-    throw std::invalid_argument("INVALID CALL!");
+    throw std::invalid_argument("Statement cannot be directly evaluated; must be executed by storage engine");
   }
 
   [[nodiscard]]
   std::variant<float, int, std::string_view, std::vector<exprs::values>>
   execute(const fetched_data_map &, std::size_t) const override {
-    throw std::invalid_argument("INVALID CALL!");
+    throw std::invalid_argument("Statement cannot be directly evaluated; must be executed by storage engine");
   }
 
   DEFAULT_CONSTRUCT_REMOVE_COPY_DEFAULT_MOVE(create_tbl_expr)
@@ -479,32 +451,40 @@ struct create_tbl_expr final : public exprs {
 
 struct insert_expr final : public exprs {
   std::string_view tblName;
-  std::vector<std::variant<std::string_view, int, float>> values;
   std::vector<std::string_view> columns;
+  std::vector<std::variant<std::string_view, int, float>> values;
 
   void prettyPrint(std::stringstream &s) const override {
-    s << "insert into: " << tblName << "values: \n";
-    for (std::size_t i = 0; i < columns.size(); ++i) {
-      s << columns[i] << " value -> ";
-      std::visit([&s](auto &&v) { s << v; }, values[i]);
-      s << "\n";
+    s << "Table name: " << tblName << "\n";
+    for (auto &c : columns) {
+      s << "Column: " << c << " \n";
+    }
+
+    for (auto &v : values) {
+      std::visit(
+          overload{
+              [&s](int v) { s << "Value: " << v << " \n"; },
+              [&s](float v) { s << "Value: " << v << " \n"; },
+              [&s](std::string_view v) { s << "Value: " << v << " \n"; },
+          },
+          v);
     }
   }
 
   [[nodiscard]]
   std::variant<float, int, std::string_view, std::vector<exprs::values>>
   execute() const override {
-    throw std::invalid_argument("INVALID CALL!");
+    throw std::invalid_argument("Statement cannot be directly evaluated; must be executed by storage engine");
   }
 
   [[nodiscard]]
   std::variant<float, int, std::string_view, std::vector<exprs::values>>
   execute(const fetched_data_map &, std::size_t) const override {
-    throw std::invalid_argument("INVALID CALL!");
+    throw std::invalid_argument("Statement cannot be directly evaluated; must be executed by storage engine");
   }
 
   void retriveColumns(std::vector<std::string_view> &) override {
-    throw std::invalid_argument("INVALID CALL!");
+    throw std::invalid_argument("Statement cannot be directly evaluated; must be executed by storage engine");
   }
 
   DEFAULT_CONSTRUCT_REMOVE_COPY_DEFAULT_MOVE(insert_expr)
@@ -514,8 +494,16 @@ struct select_expr final : public exprs {
   std::vector<std::unique_ptr<exprs>> innerExpr;
   std::string_view tblName;
 
-  // TODO: Replace this later
   std::unique_ptr<exprs> whereExpr;
+
+  [[nodiscard]] bool hasWildcard() const noexcept {
+    for (const auto &expr : innerExpr) {
+      if (dynamic_cast<const wildcard_expr *>(expr.get()) != nullptr) {
+        return true;
+      }
+    }
+    return false;
+  }
 
   void prettyPrint(std::stringstream &s) const override {
     s << "select: (";
@@ -527,12 +515,19 @@ struct select_expr final : public exprs {
 
     s << ")";
     s << " from table: " << (tblName.length() ? tblName : "NULL");
+    if (whereExpr) {
+      s << " where: ";
+      whereExpr->prettyPrint(s);
+    }
     s << "\n";
   };
 
   void retriveColumns(std::vector<std::string_view> &columnsTofetch) override {
     for (auto &exp : innerExpr) {
       exp->retriveColumns(columnsTofetch);
+    }
+    if (whereExpr) {
+      whereExpr->retriveColumns(columnsTofetch);
     }
   }
 
@@ -596,6 +591,9 @@ struct select_expr final : public exprs {
     for (const auto &expr : innerExpr) {
       expr->retriveColumns(columns);
     }
+    if (whereExpr) {
+      whereExpr->retriveColumns(columns);
+    }
 
     return columns;
   }
@@ -636,6 +634,21 @@ class parser {
 
   [[nodiscard]]
   inline std::unique_ptr<exprs> binaryExpr();
+
+  [[nodiscard]]
+  inline std::unique_ptr<exprs> logicalOrExpr();
+
+  [[nodiscard]]
+  inline std::unique_ptr<exprs> logicalAndExpr();
+
+  [[nodiscard]]
+  inline std::unique_ptr<exprs> comparisonExpr();
+
+  [[nodiscard]]
+  inline std::unique_ptr<exprs> additiveExpr();
+
+  [[nodiscard]]
+  inline std::unique_ptr<exprs> multiplicativeExpr();
 
   [[nodiscard]]
   inline std::unique_ptr<exprs> unaryExpr();

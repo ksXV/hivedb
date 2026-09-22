@@ -4,6 +4,7 @@
 #include <parser/lexer.hpp>
 #include <parser/tokens.hpp>
 #include <stdexcept>
+#include <string>
 #include <string_view>
 #include <unordered_map>
 #include <vector>
@@ -13,10 +14,12 @@ namespace hivedb {
 using namespace std::literals;
 const std::unordered_map<std::string_view, token_type> lexer::reservedKeywords{
     {"select"sv, token_type::select}, {"from"sv, token_type::from},
+    {"where"sv, token_type::where},
     {"create"sv, token_type::create}, {"table"sv, token_type::table},
     {"not"sv, token_type::_not},      {"null"sv, token_type::null},
     {"insert"sv, token_type::insert}, {"into"sv, token_type::into},
     {"values"sv, token_type::values},
+    {"and"sv, token_type::_and},      {"or"sv, token_type::_or},
 };
 
 lexer::lexer(std::string_view input)
@@ -81,15 +84,57 @@ void lexer::nextToken() {
     case '.':
       addToken(token_type::dot);
       break;
+    case '=':
+      if (peek() == '=') {
+        const std::size_t start = m_position;
+        read();
+        addToken(token_type::equal,
+                 std::string_view{m_input.c_str() + start, 2});
+      } else {
+        addToken(token_type::equal, "=");
+      }
+      break;
     case '!':
-      addToken(token_type::bang);
+      if (peek() == '=') {
+        const std::size_t start = m_position;
+        read();
+        addToken(token_type::not_equal,
+                 std::string_view{m_input.c_str() + start, 2});
+      } else {
+        addToken(token_type::bang, "!");
+      }
+      break;
+    case '<':
+      if (peek() == '=') {
+        const std::size_t start = m_position;
+        read();
+        addToken(token_type::less_equal,
+                 std::string_view{m_input.c_str() + start, 2});
+      } else if (peek() == '>') {
+        const std::size_t start = m_position;
+        read();
+        addToken(token_type::not_equal,
+                 std::string_view{m_input.c_str() + start, 2});
+      } else {
+        addToken(token_type::less, "<");
+      }
+      break;
+    case '>':
+      if (peek() == '=') {
+        const std::size_t start = m_position;
+        read();
+        addToken(token_type::greater_equal,
+                 std::string_view{m_input.c_str() + start, 2});
+      } else {
+        addToken(token_type::greater, ">");
+      }
       break;
     case '\0':
       [[fallthrough]];
     case ';':
       addToken(token_type::eof);
       break;
-    case '"':
+    case '\"':
       parseString();
       break;
 
@@ -120,7 +165,8 @@ void lexer::addNumber() {
   const std::size_t currentPos = m_position;
   while (isDigit(peek())) read();
 
-  if (m_current == '.' && isDigit(peek())) {
+  if (peek() == '.' && (m_nextPosition + 1 < m_input.length() && isDigit(m_input[m_nextPosition + 1]))) {
+    read();
     while (isDigit(peek())) read();
 
     const std::string_view number{m_input.c_str() + currentPos,
@@ -163,9 +209,17 @@ void lexer::addIdentifier() {
   const std::string_view keyword{m_input.c_str() + currentPos,
                                  m_position - currentPos + 1};
 
-  if (auto it = reservedKeywords.find(keyword); it != reservedKeywords.end()) {
+  std::string lowerKeyword;
+  lowerKeyword.reserve(keyword.size());
+  for (char c : keyword) {
+    lowerKeyword.push_back(
+        static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
+  }
+
+  if (auto it = reservedKeywords.find(lowerKeyword);
+      it != reservedKeywords.end()) {
     const auto [i, t] = *it;
-    addToken(t, i);
+    addToken(t, keyword);
     return;
   }
 

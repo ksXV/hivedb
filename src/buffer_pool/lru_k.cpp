@@ -20,12 +20,12 @@ void lru_k::recordAccess(frame_id_t id) {
   if (id >= m_size)
     throw std::invalid_argument("record_access: id is out of range");
 
-  spdlog::info("Recording access for frame {}", id);
+  spdlog::debug("Recording access for frame {}", id);
   const auto it = m_current_nodes.find(id);
   if (it == m_current_nodes.end()) {
     std::vector<std::uint64_t> history{};
     history.push_back(m_current_timestamp++);
-    m_current_nodes.insert({id, {history, true}});
+    m_current_nodes.insert({id, {history, false}});
     return;
   }
   auto &[_, node] = *it;
@@ -36,7 +36,7 @@ void lru_k::setEvictable(frame_id_t id, bool set_evictable) {
   if (id >= m_size)
     throw std::invalid_argument("set_evictable: id is out of range");
 
-  spdlog::info("Setting frame {} to evictable status {}", id, set_evictable);
+  spdlog::debug("Setting frame {} to evictable status {}", id, set_evictable);
   const auto it = m_current_nodes.find(id);
   if (it == m_current_nodes.end()) return;
 
@@ -47,7 +47,7 @@ void lru_k::setEvictable(frame_id_t id, bool set_evictable) {
 std::optional<frame_id_t> lru_k::evict() {
   if (m_current_nodes.empty()) return std::nullopt;
 
-  spdlog::info("Attempting to evict a frame...");
+  spdlog::debug("Attempting to evict a frame...");
   const auto it = std::find_if(
       m_current_nodes.begin(), m_current_nodes.end(), [this](const auto &i) {
         const auto &[_, node] = i;
@@ -59,7 +59,7 @@ std::optional<frame_id_t> lru_k::evict() {
   if (it != m_current_nodes.end()) {
     const auto [frame_id, _] = *it;
     m_current_nodes.erase(it);
-    spdlog::info("Trivial eviction, evicted {}", frame_id);
+    spdlog::debug("Trivial eviction, evicted {}", frame_id);
     return frame_id;
   }
 
@@ -87,7 +87,7 @@ std::optional<frame_id_t> lru_k::evict() {
 
   m_current_nodes.erase(id);
 
-  spdlog::info("Found {}! evicting it now...", id);
+  spdlog::debug("Found {}! evicting it now...", id);
   return id;
 }
 void lru_k::remove(frame_id_t id) {
@@ -97,16 +97,14 @@ void lru_k::remove(frame_id_t id) {
     const auto &[_, node] = *it;
     if (node.is_evictable) {
       m_current_nodes.erase(id);
-      spdlog::info("Removing frame {}", id);
-      return;
+      spdlog::debug("Removing frame {}", id);
     }
   }
 }
 
 std::size_t lru_k::size() const {
-  return std::accumulate(m_current_nodes.begin(), m_current_nodes.end(), 0,
-                         [](auto acc, const auto &item) {
-                           return acc + item.second.is_evictable;
-                         });
+  return std::count_if(
+      m_current_nodes.begin(), m_current_nodes.end(),
+      [](const auto &pair) { return pair.second.is_evictable; });
 }
 }  // namespace hivedb

@@ -91,7 +91,6 @@ struct b_plus_tree_leaf_node final : public b_plus_tree_node {
       ((hivedb::PAGE_SIZE - (sizeof(std::int64_t) * 4)) /
        (sizeof(K) + sizeof(V)));
 
-  static constexpr auto something_to_be_renamed = (MAX_NUMBER_OF_ELEMENTS + 1) % 2;
   explicit b_plus_tree_leaf_node(char* buffer)  // NOLINT
       : b_plus_tree_node(buffer), next_page_id() {
     std::memcpy(&next_page_id, internal_data, sizeof(next_page_id));
@@ -166,28 +165,23 @@ struct b_plus_tree_leaf_node final : public b_plus_tree_node {
   }
 
   std::optional<std::uint64_t> find_index(const K& key) const {
-    ASSERT(current_size > 0);
-    std::int64_t high = current_size - 1;
+    if (current_size == 0) return std::nullopt;
     std::int64_t low = 0;
-    ASSERT(high >= low);
-    std::int64_t middle = (high + low) / 2;
+    std::int64_t high = static_cast<std::int64_t>(current_size) - 1;
 
-    while (high > low) {
+    while (low <= high) {
+      std::int64_t middle = low + (high - low) / 2;
       if (*indexes(middle) == key) {
-        break;
+        return static_cast<std::uint64_t>(middle);
       }
       if (*indexes(middle) > key) {
         high = middle - 1;
       } else {
         low = middle + 1;
       }
-      middle = (high + low) / 2;
     }
 
-    if (*indexes(middle) != key) return std::nullopt;
-
-    ASSERT(middle >= 0);
-    return static_cast<uint64_t>(middle);
+    return std::nullopt;
   }
 
   void trivial_insert(const K& key, const V& value,
@@ -223,21 +217,23 @@ struct b_plus_tree_leaf_node final : public b_plus_tree_node {
     spdlog::info("Splitting node with page_id {}", new_page_id);
     ASSERT(should_split());
 
+    const auto mid = max_size / 2;
+    const auto count = max_size - mid;
+
     new_node.type = b_plus_tree_node_type::leaf_node;
-    new_node.max_size = current_size;
-    std::copy(indexes(max_size/2), indexes(max_size-1), new_node.indexes(0));
-    std::copy(records(max_size/2), records(max_size-1), new_node.records(0));
-
-    //15 26 35 45
-    *new_node.indexes((max_size/2) - something_to_be_renamed) = *indexes(max_size-1);
-    *new_node.records((max_size/2) - something_to_be_renamed) = *records(max_size-1);
-
-    std::for_each(indexes(max_size/2), indexes(max_size-1), [] (K& key) {key = K::invalid_key();});
-    std::for_each(records(max_size/2), records(max_size-1), [] (V& val) {val = V::invalid_key();});
-
-    current_size = current_size / 2;
-    new_node.current_size = current_size + ((something_to_be_renamed+1) % 2);
+    new_node.max_size = max_size;
+    new_node.current_size = count;
+    new_node.next_page_id = next_page_id;
     next_page_id = new_page_id;
+
+    for (std::uint64_t i = 0; i < count; ++i) {
+      *new_node.indexes(i) = *indexes(mid + i);
+      *new_node.records(i) = *records(mid + i);
+      *indexes(mid + i) = K::invalid_key();
+      *records(mid + i) = V::invalid_key();
+    }
+
+    current_size = mid;
 
     update_buffer_with_new_values();
     new_node.update_buffer_with_new_values();
@@ -281,7 +277,6 @@ struct b_plus_tree_inner_node final : public b_plus_tree_node {
   static constexpr auto MAX_NUMBER_OF_ELEMENTS =
       ((hivedb::PAGE_SIZE - (sizeof(std::int64_t) * 4)) /
        (sizeof(K) + sizeof(V)));
-  static constexpr auto something_to_be_renamed = MAX_NUMBER_OF_ELEMENTS % 2 ? 1 : 2;
 
   explicit b_plus_tree_inner_node(char* buffer)  // NOLINT
       : b_plus_tree_node(buffer), previous_page_id() {
@@ -323,161 +318,85 @@ struct b_plus_tree_inner_node final : public b_plus_tree_node {
     update_buffer_with_new_values();
   }
 
-  std::uint64_t find_index_for_insert(const K& key) const {
+  void insert_key_and_child(const K& key, const V& child_page_id) {
     ASSERT(can_insert_trivially());
-    if (current_size < 5) {
-      std::uint64_t idx = 0;
-      while (idx != (current_size-1)) {
-        if ((*indexes(idx)) > key) break;
-        idx++;
-      }
 
-      return idx;
+    std::uint64_t idx = 0;
+    while (idx < current_size - 1 && *indexes(idx) < key) {
+      idx++;
     }
 
-    std::int64_t high = current_size - 2;
-    std::int64_t low = 0;
-
-    if (key > *indexes(high)) {
-      return current_size-1;
+    for (std::uint64_t i = current_size; i > idx; --i) {
+      *indexes(i) = *indexes(i - 1);
+      *page_ids(i) = *page_ids(i - 1);
     }
 
-    ASSERT(low < high);
-    while (high > low) {
-      std::int64_t middle = (high + low) / 2;
-      if (*indexes(middle) >= key) {
-        high = middle;
-      } else {
-        low = middle + 1;
-      }
+    *indexes(idx) = key;
+    *page_ids(idx + 1) = child_page_id;
+    current_size++;
+
+    update_buffer_with_new_values();
+  }
+
+  K split_node(b_plus_tree_inner_node& new_node) {
+    ASSERT(should_split());
+
+    const auto L = (max_size + 1) / 2;
+    const auto R = max_size - L;
+
+    K promoted_key = *indexes(L - 1);
+
+    new_node.type = b_plus_tree_node_type::inner_node;
+    new_node.max_size = max_size;
+    new_node.current_size = R;
+    new_node.previous_page_id = INVALID_PAGE_ID;
+
+    for (std::uint64_t i = 0; i < R; ++i) {
+      *new_node.page_ids(i) = *page_ids(L + i);
     }
 
-    ASSERT(low >= 0);
-    return static_cast<std::uint64_t>(low);
+    for (std::uint64_t i = 0; i < R - 1; ++i) {
+      *new_node.indexes(i) = *indexes(L + i);
+    }
+    *new_node.indexes(R - 1) = K::invalid_key();
+
+    // Clean up left node
+    *indexes(L - 1) = K::invalid_key();
+    for (std::uint64_t i = L; i < max_size; ++i) {
+      *indexes(i) = K::invalid_key();
+      *page_ids(i) = V::invalid_key();
+    }
+    current_size = L;
+
+    update_buffer_with_new_values();
+    new_node.update_buffer_with_new_values();
+
+    return promoted_key;
+  }
+
+  void split_node(b_plus_tree_inner_node& new_node, page_id_t previous_page) {
+    new_node.previous_page_id = previous_page;
+    split_node(new_node);
   }
 
   template <value_t V_leaf>
   void trivial_insert_leaf_node(const V& value,
                                 b_plus_tree_leaf_node<K, V_leaf>& new_node) {
-    ASSERT(can_insert_trivially());
-
-    const auto key = *new_node.indexes(0);
-
-    const auto where_to_insert = find_index_for_insert(key);
-
-    if (where_to_insert == (current_size - 1)) {
-      *indexes(current_size) = *indexes(current_size-1);
-      *page_ids(current_size) = *page_ids(current_size-1);
-
-      *indexes(current_size-1) = key;
-      *page_ids(current_size-1) = value;
-
-      current_size++;
-      std::swap(*page_ids(current_size - 2), *page_ids(current_size-1));
-
-      update_buffer_with_new_values();
-      return;
-    }
-
-    for (auto i = current_size; i > where_to_insert; --i) {
-      *indexes(i) = *indexes(i - 1);
-      *page_ids(i) = *page_ids(i - 1);
-    }
-
-    *indexes(where_to_insert) = key;
-    *page_ids(where_to_insert) = value;
-
-    ASSERT(where_to_insert + 1 < current_size);
-    std::swap(*page_ids(where_to_insert), *page_ids(where_to_insert+1));
-
-    current_size++;
-
-    update_buffer_with_new_values();
-  }
-
-  void split_node(b_plus_tree_inner_node& new_node, page_id_t previous_page) {
-    ASSERT(should_split());
-
-
-    new_node.type = b_plus_tree_node_type::inner_node;
-    new_node.max_size = max_size;
-    std::copy(indexes(max_size/2+1), indexes(max_size-1), new_node.indexes(0));
-    std::copy(page_ids(max_size/2+1), page_ids(max_size-1), new_node.page_ids(0));
-
-    *new_node.indexes(max_size/2 - something_to_be_renamed) = *indexes(max_size-1);
-    *new_node.page_ids(max_size/2 - something_to_be_renamed) = *page_ids(max_size-1);
-
-    std::for_each(indexes(max_size/2+1), indexes(max_size-1), [] (K& key) {key = K::invalid_key();});
-    std::for_each(page_ids(max_size/2+1), page_ids(max_size-1), [] (V& val) {val = V::invalid_key();});
-
-    current_size = current_size / 2 + 1;
-    new_node.current_size = current_size - something_to_be_renamed;
-    new_node.previous_page_id = previous_page;
-
-    update_buffer_with_new_values();
-    new_node.update_buffer_with_new_values();
+    insert_key_and_child(*new_node.indexes(0), value);
   }
 
   void trivial_insert_inner_node(const V& value,
                                  b_plus_tree_inner_node& new_node,
-                                 b_plus_tree_inner_node& previous_node) {
-    ASSERT(can_insert_trivially());
-    ASSERT(false);
-
-    const auto key = *new_node.indexes(0);
-
-    const auto where_to_insert = find_index(key);
-
-    if (where_to_insert == (current_size - 1)) {
-      append(key, value);
-      current_size++;
-      std::swap(*indexes(current_size - 1), *indexes(current_size - 2));
-
-      const auto value_to_insert_into_prev_node = *page_ids(0);
-
-      std::memcpy(page_ids(0), page_ids(1), current_size - 1);
-      std::memcpy(indexes(0), indexes(1), current_size - 1);
-      current_size--;
-
-      previous_node.append(K::invalid_key(), value_to_insert_into_prev_node);
-
-      previous_node.update_buffer_with_new_values();
-      update_buffer_with_new_values();
-      return;
-    }
-
-    for (auto i = (current_size - 1); i > where_to_insert; --i) {
-      *indexes(i) = *indexes(i - 1);
-      *page_ids(i) = *page_ids(i - 1);
-    }
-
-    *indexes(where_to_insert) = key;
-    *page_ids(where_to_insert) = value;
-
-    current_size++;
-
-    ASSERT(where_to_insert + 1 < current_size);
-    std::swap(*page_ids(where_to_insert), *page_ids(where_to_insert + 1));
-
-    const auto value_to_insert_into_prev_node = *page_ids(0);
-
-    std::memcpy(page_ids(0), page_ids(1), current_size - 1);
-    std::memcpy(indexes(0), indexes(1), current_size - 1);
-
-    current_size--;
-
-    previous_node.append(K::invalid_key(), value_to_insert_into_prev_node);
-
-    update_buffer_with_new_values();
-    previous_node.update_buffer_with_new_values();
+                                 b_plus_tree_inner_node&) {
+    insert_key_and_child(*new_node.indexes(0), value);
   }
 
   std::uint64_t find_index(const K& key) const {
     ASSERT(current_size > 0);
-    std::int64_t high = current_size - 2;
+    std::int64_t high = static_cast<std::int64_t>(current_size) - 2;
 
     // Handle the case where the last key is "nil" or the invalid one
-    if (key >= *indexes(high)) {
+    if (high < 0 || key >= *indexes(high)) {
       return current_size - 1;
     }
 
