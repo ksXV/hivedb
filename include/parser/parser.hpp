@@ -124,7 +124,7 @@ struct literal_expr final : public exprs {
             clm_value = varchar::deserialize(clm.ptr);
             break;
           default:
-            throw std::invalid_argument("Unknown data type detected!");
+            throw std::invalid_argument("Unknown data type encountered during column deserialization");
         }
 
         return clm_value;
@@ -546,7 +546,7 @@ struct select_expr final : public exprs {
             if constexpr (std::is_same_v<T, std::vector<values>>) {
               if (arg.size() != 1)
                 throw std::invalid_argument(
-                    "An expression cannot return more than 1 value!");
+                    "Scalar sub-expression evaluated to multiple values");
               v.push_back(arg[0]);
             } else {
               v.push_back(arg);
@@ -572,7 +572,7 @@ struct select_expr final : public exprs {
             if constexpr (std::is_same_v<T, std::vector<values>>) {
               if (arg.size() != 1)
                 throw std::invalid_argument(
-                    "An expression cannot return more than 1 value!");
+                    "Scalar sub-expression evaluated to multiple values");
               v.push_back(arg[0]);
             } else {
               v.push_back(arg);

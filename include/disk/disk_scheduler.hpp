@@ -73,7 +73,7 @@ disk_scheduler<T>::disk_scheduler(const std::filesystem::path &db_path)
         case disk_request_type::shutdown:
           return;
         default:
-          throw std::invalid_argument("invalid request type");
+          throw std::invalid_argument("disk_scheduler worker encountered an unknown disk request type");
       }
     }
   });

@@ -1,10 +1,11 @@
-#include <fmt/core.h>
 #include <exception>
+#include <filesystem>
 #include <sstream>
 #include <variant>
 #include <vector>
 
 #include <catch_amalgamated.hpp>
+#include <fmt/core.h>
 
 #include <parser/lexer.hpp>
 #include <parser/parser.hpp>

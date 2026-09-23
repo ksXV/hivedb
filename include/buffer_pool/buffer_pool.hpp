@@ -143,7 +143,7 @@ frame_header &buffer_pool<T>::request_page(page_id_t id, bool should_pin) {
   m_scheduler.schedule(std::move(req));
 
   is_done.wait();
-  if (!is_done.get()) throw std::runtime_error("request_page() failed");
+  if (!is_done.get()) throw std::runtime_error("Failed to read page " + std::to_string(id) + " from storage");
 
   // Do we have an empty space in the page table?
   if (m_page_table.size() <
@@ -186,7 +186,7 @@ frame_header &buffer_pool<T>::request_page(page_id_t id, bool should_pin) {
     ASSERT(page_id_to_be_flushed_it != m_page_table.end());
 
     const bool status = flush_page(page_id_to_be_flushed_it->first);
-    if (!status) throw std::runtime_error("flush_page() failed");
+    if (!status) throw std::runtime_error("Failed to flush dirty page " + std::to_string(page_id_to_be_flushed_it->first) + " to make room in buffer pool");
 
     frame_id = m_empty_frames.front();
     m_page_table.emplace(id, frame_id);
@@ -215,12 +215,12 @@ frame_header &buffer_pool<T>::request_page(page_id_t id, bool should_pin) {
   if (!frame_to_evict.has_value() ||
       frame_to_evict.value() == INVALID_FRAME_ID) {
     throw std::runtime_error(
-        "frame_replacer.evict() failed; got -1 or invalid frame");
+        "Buffer pool exhausted: could not find an unpinned frame to evict");
   }
 
   if (m_frames.at(frame_to_evict.value()).get_pin_count() > 0) {
     throw std::runtime_error(
-        "VICTIM IS PINNED! maybe this a oom? needs more testing.");
+        "Buffer pool eviction invariant failed: selected victim frame " + std::to_string(frame_to_evict.value()) + " is currently pinned");
   }
 
   const auto page_id_to_be_removed =
@@ -295,7 +295,7 @@ bool buffer_pool<T>::flush_page(page_id_t page_id, bool should_evict) {
 
   is_done.wait();
   if (!is_done.get())
-    throw std::runtime_error("flush_page() failed; tried to write");
+    throw std::runtime_error("Failed to flush page " + std::to_string(page_id) + " to disk");
   if (frame.get_pin_count() > 0) {
     frame.decrease_pin_count();
   }

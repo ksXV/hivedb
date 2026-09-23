@@ -27,7 +27,7 @@ class lexer {
   [[nodiscard]] inline bool isLetter(char c);
   [[nodiscard]] inline bool isDigit(char c);
 
-  inline void addToken(token_type, std::string_view) noexcept;
+  inline void addToken(token_type, std::string_view = "") noexcept;
 
   inline void parseString();
 

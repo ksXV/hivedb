@@ -1,6 +1,5 @@
 #pragma once
 
-#include <algorithm>
 #include <buffer_pool/buffer_pool.hpp>
 #include <cassert>
 #include <concepts>

@@ -1,5 +1,7 @@
 #include <unistd.h>
 
+#include <cerrno>
+#include <cstring>
 #include <misc/temporary_file_wrapper.hpp>
 #include <stdexcept>
 
@@ -9,7 +11,7 @@ temporary_file_wrapper::temporary_file_wrapper() {
 
   m_fd = mkstemp(temp_template);
   if (m_fd == -1) {
-    throw std::runtime_error("FAILED TO CREATE TEMP FILE");
+    throw std::runtime_error("Failed to create temporary file via mkstemp: " + std::string(std::strerror(errno)));
   }
 
   m_file_path = std::filesystem::path{temp_template};

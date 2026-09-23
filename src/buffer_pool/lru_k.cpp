@@ -6,19 +6,18 @@
 #include <algorithm>
 #include <buffer_pool/lru_k.hpp>
 #include <misc/config.hpp>
-#include <numeric>
 #include <stdexcept>
 
 namespace hivedb {
 lru_k::lru_k(std::int32_t k, frame_id_t size)
     : m_k(k), m_size(size), m_current_nodes(), m_current_timestamp(0) {
   if (k < 0 || size < 0)
-    throw std::invalid_argument("k or size must be positive");
+    throw std::invalid_argument("lru_k: parameters 'k' and 'size' must both be non-negative");
 }
 
 void lru_k::recordAccess(frame_id_t id) {
   if (id >= m_size)
-    throw std::invalid_argument("record_access: id is out of range");
+    throw std::invalid_argument("lru_k::recordAccess: frame id " + std::to_string(id) + " is out of bounds [0, " + std::to_string(m_size) + ")");
 
   spdlog::debug("Recording access for frame {}", id);
   const auto it = m_current_nodes.find(id);
@@ -34,7 +33,7 @@ void lru_k::recordAccess(frame_id_t id) {
 
 void lru_k::setEvictable(frame_id_t id, bool set_evictable) {
   if (id >= m_size)
-    throw std::invalid_argument("set_evictable: id is out of range");
+    throw std::invalid_argument("lru_k::setEvictable: frame id " + std::to_string(id) + " is out of bounds [0, " + std::to_string(m_size) + ")");
 
   spdlog::debug("Setting frame {} to evictable status {}", id, set_evictable);
   const auto it = m_current_nodes.find(id);
@@ -91,7 +90,7 @@ std::optional<frame_id_t> lru_k::evict() {
   return id;
 }
 void lru_k::remove(frame_id_t id) {
-  if (id >= m_size) throw std::invalid_argument("remove: id is out of range");
+  if (id >= m_size) throw std::invalid_argument("lru_k::remove: frame id " + std::to_string(id) + " is out of bounds [0, " + std::to_string(m_size) + ")");
 
   if (const auto it = m_current_nodes.find(id); it != m_current_nodes.end()) {
     const auto &[_, node] = *it;

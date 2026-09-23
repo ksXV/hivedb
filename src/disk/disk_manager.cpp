@@ -20,7 +20,7 @@ disk_manager::disk_manager(const std::filesystem::path &db_path)
     m_db_file.open(db_path, std::ios::trunc | std::ios::binary | std::ios::in |
                                 std::ios::out);
     if (!m_db_file.is_open())
-      throw std::runtime_error("failed create the file!");
+      throw std::runtime_error("Failed to create database file at '" + db_path.string() + "'");
   }
 
   // the first page (or the + 1) is reserved for the system/root of the b+tree
@@ -31,13 +31,13 @@ void disk_manager::write_page(page_id_t id, const char *buffer) {
   if (id < 0)
     throw std::runtime_error("Invalid id detected!: " + std::to_string(id));
   offset_t offset =
-      m_pages.find(id) != m_pages.end() ? allocate_new_page() : m_pages[id];
+      m_pages.find(id) == m_pages.end() ? allocate_new_page() : m_pages[id];
 
   m_db_file.seekg(static_cast<std::fstream::off_type>(offset));
   m_db_file.write(buffer, PAGE_SIZE);
 
   if (m_db_file.bad()) {
-    throw std::runtime_error("Error writing page_id:" + std::to_string(id));
+    throw std::runtime_error("I/O error while writing page " + std::to_string(id) + " to disk");
   }
 
   m_pages[id] = offset;
@@ -55,8 +55,8 @@ void disk_manager::read_page(page_id_t id, char *buffer) {
   const auto file_size = get_file_size();
   if (offset > file_size) {
     throw std::runtime_error(
-        "Offset was bigger (somehow) than file size! offset: " +
-        std::to_string(offset) + " file_size: " + std::to_string(file_size));
+        "Requested page offset " + std::to_string(offset) +
+        " exceeds database file size " + std::to_string(file_size));
   }
 
   m_pages[id] = offset;
@@ -65,7 +65,7 @@ void disk_manager::read_page(page_id_t id, char *buffer) {
   m_db_file.read(buffer, PAGE_SIZE);
 
   if (m_db_file.bad()) {
-    throw std::runtime_error("Error reading page_id:" + std::to_string(id));
+    throw std::runtime_error("I/O error while reading page " + std::to_string(id) + " from disk");
   }
 
   const auto read_count = m_db_file.gcount();
@@ -77,9 +77,9 @@ void disk_manager::read_page(page_id_t id, char *buffer) {
 
 void disk_manager::delete_page(page_id_t id) {
   if (id < 0)
-    throw std::runtime_error("Invalid id detected!: " + std::to_string(id));
+    throw std::runtime_error("Invalid page id in delete_page: " + std::to_string(id));
   if (m_pages.find(id) == m_pages.end())
-    throw std::runtime_error("Invalid id detected!: " + std::to_string(id));
+    throw std::runtime_error("Cannot delete page " + std::to_string(id) + ": page id is not registered in page table");
 
   offset_t offset = m_pages[id];
 
@@ -110,8 +110,8 @@ std::size_t disk_manager::get_file_size() {
 
   int status = stat(m_db_file_path.c_str(), &st);
   if (status == -1) {
-    throw std::runtime_error("Failed to fetch the file size! ERRNO: " +
-                             std::to_string(errno));
+    throw std::runtime_error("Failed to stat database file '" + m_db_file_path.string() +
+                             "': " + std::strerror(errno));
   }
 
   return st.st_size;

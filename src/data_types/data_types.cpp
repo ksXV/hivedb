@@ -23,16 +23,16 @@ std::string_view toString(data_types dt) {
 data_types fromString(std::string_view dt) {
   assert(isTypeValid(dt));
 
-  if (dt == "integer") return data_types::integer;
-  if (dt == "varchar") return data_types::varchar;
-  if (dt == "real") return data_types::real;
-  throw std::invalid_argument("RAHHHHHHHHHHHHHHHHHHH! Invalid data type.");
+  if (dt == "integer" || dt == "int") return data_types::integer;
+  if (dt == "varchar" || dt == "string" || dt == "text") return data_types::varchar;
+  if (dt == "real" || dt == "float") return data_types::real;
+  throw std::invalid_argument("Unsupported data type: '" + std::string(dt) + "'");
 }
 
 bool isTypeValid(std::string_view dt) {
-  if (dt == "integer") return true;
-  if (dt == "varchar") return true;
-  if (dt == "real") return true;
+  if (dt == "integer" || dt == "int") return true;
+  if (dt == "varchar" || dt == "string" || dt == "text") return true;
+  if (dt == "real" || dt == "float") return true;
   return false;
 }
 std::size_t findOffset(data_types dt) {

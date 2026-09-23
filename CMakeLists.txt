@@ -45,6 +45,7 @@ tests/buffer_pool/lru_k.cpp
 tests/buffer_pool/buffer_pool.cpp
 
 tests/b_plus_tree/b_plus_tree.cpp
+tests/storage_engine/storage_engine.cpp
 
 src/parser/lexer.cpp
 src/parser/tokens.cpp
@@ -84,6 +85,7 @@ src/buffer_pool/buffer_pool.cpp
 
 src/disk/disk_manager.cpp
 src/disk/disk_manager_mock.cpp
+src/misc/temporary_file_wrapper.cpp
 )
 
 include_directories(${PROJECT_SOURCE_DIR}/include)
@@ -91,3 +93,4 @@ include_directories(${PROJECT_SOURCE_DIR}/include)
 target_link_libraries(tests PRIVATE Catch2 fmt::fmt spdlog::spdlog_header_only libassert::assert)
 target_link_libraries(hive PRIVATE fmt::fmt)
 target_link_libraries(hive PRIVATE spdlog::spdlog_header_only)
+target_link_libraries(hive PRIVATE libassert::assert)

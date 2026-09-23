@@ -25,13 +25,13 @@ const std::unordered_map<std::string_view, token_type> lexer::reservedKeywords{
 lexer::lexer(std::string_view input)
     : m_input{input}, m_position{0}, m_nextPosition{1}, m_current{} {
   if (input.empty()) {
-    throw std::invalid_argument("bad input");
+    throw std::invalid_argument("Input query cannot be empty");
   }
   m_current = input[m_position];
 };
 
 bool lexer::isLetter(char c) {
-  return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z');
+  return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '_';
 }
 
 bool lexer::isDigit(char c) { return (c >= '0' && c <= '9'); }
@@ -52,7 +52,7 @@ char lexer::peek() const noexcept {
 }
 
 void lexer::addToken(token_type type,
-                     std::string_view identifier = "") noexcept {
+                     std::string_view identifier) noexcept {
   m_tokens.emplace_back(type, identifier);
 }
 
@@ -134,6 +134,8 @@ void lexer::nextToken() {
     case ';':
       addToken(token_type::eof);
       break;
+    case '\'':
+      [[fallthrough]];
     case '\"':
       parseString();
       break;
@@ -153,7 +155,7 @@ void lexer::nextToken() {
       } else if (isDigit(m_current)) {
         addNumber();
       } else {
-        throw std::invalid_argument("unknown identifier");
+        throw std::invalid_argument(std::string("Unrecognized character '") + m_current + "' at position " + std::to_string(m_position));
       }
       break;
   }
@@ -183,12 +185,12 @@ void lexer::addNumber() {
 }
 
 void lexer::parseString() {
-  // skip the first '"'
+  const char quote = m_current;
   read();
 
   const std::size_t currentPos = m_position;
 
-  while (!isAtEnd() && peek() != '\"') {
+  while (!isAtEnd() && peek() != quote) {
     read();
   }
   const std::string_view str{m_input.c_str() + currentPos,
@@ -202,7 +204,7 @@ void lexer::parseString() {
 
 void lexer::addIdentifier() {
   const std::size_t currentPos = m_position;
-  while (isLetter(peek())) {
+  while (isLetter(peek()) || isDigit(peek())) {
     read();
   }
 

@@ -2,6 +2,7 @@
 #include <b_plus_tree/b_plus_tree_node.hpp>
 #include <buffer_pool/buffer_pool.hpp>
 #include <disk/disk_scheduler.hpp>
+#include <memory>
 #include <misc/config.hpp>
 #include <optional>
 #include <queue>
@@ -12,8 +13,12 @@ namespace hivedb {
 template <disk_manager_t T, index_t K, value_t V, value_t V_leaf>
 struct b_plus_tree {
  private:
-  buffer_pool<T> m_bp;
+  std::unique_ptr<buffer_pool<T>> m_owned_bp{nullptr};
+  buffer_pool<T> *m_bp_ptr{nullptr};
   page_id_t m_root_page_id{INVALID_PAGE_ID};
+
+  [[nodiscard]] buffer_pool<T> &bp() noexcept { return *m_bp_ptr; }
+  [[nodiscard]] const buffer_pool<T> &bp() const noexcept { return *m_bp_ptr; }
 
   static page_id_t to_page_id(const V& v) {
     if constexpr (requires { v.key; }) {
@@ -27,14 +32,64 @@ struct b_plus_tree {
   b_plus_tree() = delete;
   explicit b_plus_tree(page_id_t root_page_id, std::int32_t max_frames,
                        const std::filesystem::path &path)
-      : m_bp(max_frames, path), m_root_page_id(root_page_id) {}
+      : m_owned_bp(std::make_unique<buffer_pool<T>>(max_frames, path)),
+        m_bp_ptr(m_owned_bp.get()),
+        m_root_page_id(root_page_id) {}
+
+  explicit b_plus_tree(page_id_t root_page_id, buffer_pool<T> &shared_bp)
+      : m_owned_bp(nullptr),
+        m_bp_ptr(&shared_bp),
+        m_root_page_id(root_page_id) {}
+
+  [[nodiscard]]
+  page_id_t get_root_page_id() const noexcept {
+    return m_root_page_id;
+  }
+
+  template <typename Callback>
+  void scan(Callback &&cb) {
+    if (m_root_page_id == INVALID_PAGE_ID) {
+      return;
+    }
+
+    page_id_t current_page_id = m_root_page_id;
+    while (true) {
+      auto const current_page = &bp().request_page(current_page_id);
+      auto node = b_plus_tree_node(current_page->get_data());
+
+      if (node.type == b_plus_tree_node_type::inner_node) {
+        const auto inner_node =
+            b_plus_tree_inner_node<K, V>(current_page->get_data());
+        const auto next_page_id = *inner_node.page_ids(0);
+        current_page_id = to_page_id(next_page_id);
+        current_page->decrease_pin_count();
+      } else {
+        current_page->decrease_pin_count();
+        break;
+      }
+    }
+
+    while (current_page_id != INVALID_PAGE_ID) {
+      auto const current_page = &bp().request_page(current_page_id);
+      const auto leaf_node =
+          b_plus_tree_leaf_node<K, V_leaf>(current_page->get_data());
+
+      for (std::uint64_t i = 0; i < leaf_node.current_size; ++i) {
+        cb(*leaf_node.indexes(i), *leaf_node.records(i));
+      }
+
+      const auto next_id = leaf_node.next_page_id;
+      current_page->decrease_pin_count();
+      current_page_id = next_id;
+    }
+  }
 
   void dump_contents() {
     std::queue<page_id_t> page_ids{};
     page_ids.push(m_root_page_id);
 
     while (!page_ids.empty()) {
-      auto const current_page = &m_bp.request_page(page_ids.front(), false);
+      auto const current_page = &bp().request_page(page_ids.front(), false);
       page_ids.pop();
       auto node = b_plus_tree_node(current_page->get_data());
 
@@ -60,13 +115,13 @@ struct b_plus_tree {
 
   void find(const K &key, V_leaf &value) {
     if (m_root_page_id == INVALID_PAGE_ID) {
-      throw std::invalid_argument("root page doesn't exist!");
+      throw std::invalid_argument("B+ tree search failed: root page does not exist (tree is empty)");
     }
 
     page_id_t current_page_id = m_root_page_id;
 
     while (true) {
-      auto const current_page = &m_bp.request_page(current_page_id);
+      auto const current_page = &bp().request_page(current_page_id);
       auto node = b_plus_tree_node(current_page->get_data());
 
       if (node.type == b_plus_tree_node_type::inner_node) {
@@ -96,10 +151,14 @@ struct b_plus_tree {
 
   [[nodiscard]]
   bool insert(const K &key, const V_leaf &value) {
-    spdlog::debug("Inserting {} and {}...", key.key, value.key);
+    if constexpr (requires { key.key; value.key; }) {
+      spdlog::debug("Inserting {} and {}...", key.key, value.key);
+    } else {
+      spdlog::debug("Inserting entry into b_plus_tree...");
+    }
     if (m_root_page_id == INVALID_PAGE_ID) {
-      m_root_page_id = m_bp.allocate_new_page();
-      auto const root_node_frame = &m_bp.request_page(m_root_page_id, false);
+      m_root_page_id = bp().allocate_new_page();
+      auto const root_node_frame = &bp().request_page(m_root_page_id, false);
 
       root_node_frame->is_dirty = true;
       auto new_node =
@@ -107,7 +166,7 @@ struct b_plus_tree {
 
       new_node.init_first_node(key, value);
 
-      return m_bp.flush_page(m_root_page_id);
+      return bp().flush_page(m_root_page_id);
     }
 
     // Keep the ancestor search path local to this insert invocation so concurrent threads
@@ -120,7 +179,7 @@ struct b_plus_tree {
     bool has_split = false;
 
     while (true) {
-      auto const current_frame = &m_bp.request_page(current_page_id);
+      auto const current_frame = &bp().request_page(current_page_id);
       auto node = b_plus_tree_node(current_frame->get_data());
 
       if (node.type == b_plus_tree_node_type::inner_node) {
@@ -140,11 +199,11 @@ struct b_plus_tree {
             frame_queue.pop_back();
           }
           current_frame->decrease_pin_count();
-          return m_bp.flush_pages();
+          return bp().flush_pages();
         }
 
-        const auto new_leaf_page_id = m_bp.allocate_new_page();
-        auto const new_leaf_frame = &m_bp.request_page(new_leaf_page_id);
+        const auto new_leaf_page_id = bp().allocate_new_page();
+        auto const new_leaf_frame = &bp().request_page(new_leaf_page_id);
         new_leaf_frame->is_dirty = true;
         auto new_leaf_node = b_plus_tree_leaf_node<K, V_leaf>(new_leaf_frame->get_data());
 
@@ -182,10 +241,12 @@ struct b_plus_tree {
         continue;
       }
 
-      const auto new_inner_page_id = m_bp.allocate_new_page();
-      auto const new_inner_frame = &m_bp.request_page(new_inner_page_id);
+      const auto new_inner_page_id = bp().allocate_new_page();
+      auto const new_inner_frame = &bp().request_page(new_inner_page_id);
       new_inner_frame->is_dirty = true;
-      auto new_inner_node = b_plus_tree_inner_node<K, V>(new_inner_frame->get_data());
+
+      auto new_inner_node =
+          b_plus_tree_inner_node<K, V>(new_inner_frame->get_data());
 
       split_key = inner_node.split_node(new_inner_node);
       split_child_page_id = new_inner_page_id;
@@ -197,8 +258,8 @@ struct b_plus_tree {
     }
 
     if (has_split) {
-      const auto new_root = m_bp.allocate_new_page();
-      auto const new_root_frame = &m_bp.request_page(new_root);
+      const auto new_root = bp().allocate_new_page();
+      auto const new_root_frame = &bp().request_page(new_root);
       new_root_frame->is_dirty = true;
       auto new_root_node = b_plus_tree_inner_node<K, V>(new_root_frame->get_data());
 
@@ -219,9 +280,9 @@ struct b_plus_tree {
       new_root_frame->decrease_pin_count();
     }
 
-    return m_bp.flush_pages();
+    return bp().flush_pages();
   }
 
-  bool remove(const K &) { throw std::invalid_argument("doesnt owrk eyrt"); }
+  bool remove(const K &) { throw std::invalid_argument("B+ tree key deletion (remove) is not yet supported"); }
 };
 }  // namespace hivedb
