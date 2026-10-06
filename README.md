@@ -5,9 +5,6 @@ A disk-backed relational database engine written in C++23.
 ## Features
 
 - **Interactive REPL**:
-  - `hive> ` prompt with continuation `   -> ` for multiline input.
-  - Semicolon-delimited multi-statement queries.
-  - Dynamic ASCII table result formatting.
   - Dot-commands: `.help`, `.exit`, `.quit`.
   - Persistent mode (`./hive <db_path>`) and ephemeral in-memory mode (`./hive`).
 
@@ -15,8 +12,6 @@ A disk-backed relational database engine written in C++23.
   - `CREATE TABLE`: column types, optional `NOT NULL`.
   - `INSERT INTO`: column-specified row insertion.
   - `SELECT`: projections, wildcard `*`, scalar calculations (`SELECT 1 + 2 * 3;`), and `WHERE` filtering.
-  - Expressions: arithmetic (`+`, `-`, `*`, `/`), unary (`-`, `!`), and comparisons.
-  - String literals: single quotes (`'text'`) or double quotes (`"text"`).
 
 - **Data Types**:
   - `INTEGER` / `INT`: 4-byte signed integer.
